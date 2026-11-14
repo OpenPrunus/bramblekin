@@ -117,7 +117,7 @@ describe('Bramblekin dans Chrome', () => {
       await sleep(40);
     }
     assert.equal(await ev('window.__bramble.battle.open'), false, 'combat terminé');
-    assert.ok(await ev('window.__bramble.profile.team[0].xp > 125 || window.__bramble.zoneInfo.id === "t1"'));
+    assert.ok(await ev('window.__bramble.profile.team[0].xp > 125 || window.__bramble.zoneInfo.id === "c1"'), 'expérience gagnée, ou réveil au centre de soin après une défaite');
     await checkLayout(false);
     assert.deepEqual(c.errors, []);
   });
