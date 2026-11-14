@@ -70,7 +70,13 @@ final class Presence
     {
         $p = $c->profile;
 
-        return $p === null ? [] : ['id' => $c->id, 'name' => $p->name, 'x' => $p->x, 'y' => $p->y, 'd' => $p->dir, 'look' => $p->look, 'busy' => $c->busy()];
+        return $p === null ? [] : ['id' => $c->id, 'name' => $p->name, 'x' => $p->x, 'y' => $p->y, 'd' => $p->dir, 'look' => $p->look, 'busy' => $c->busy(), 'bike' => $p->riding];
+    }
+
+    /** Les chambres de départ sont privées : chaque joueur a la sienne (la même carte, une instance par joueur). */
+    public static function room(?Profile $p, string $zone): string
+    {
+        return $zone === 'ha1' && $p !== null ? "ha1#{$p->id}" : $zone;
     }
 
     /** Fait entrer le joueur sur sa carte actuelle : il reçoit la carte et les joueurs présents, eux le voient arriver. */
@@ -84,18 +90,20 @@ final class Presence
         if ($zone === null) {
             return;
         }
-        $peers = array_values(array_map(self::peer(...), array_filter($this->zones[$zone->id] ?? [], static fn (Client $o): bool => $o !== $c)));
-        $this->zones[$zone->id][$c->id] = $c;
+        $key = self::room($p, $zone->id);
+        $peers = array_values(array_map(self::peer(...), array_filter($this->zones[$key] ?? [], static fn (Client $o): bool => $o !== $c)));
+        $this->zones[$key][$c->id] = $c;
         $c->send('zone', [
             'zone' => $zone->toClient(self::visibleFor($p), self::beatenBy($p)),
             'me' => ['x' => $p->x, 'y' => $p->y, 'd' => $p->dir],
             'peers' => $peers,
         ]);
-        $this->broadcast($zone->id, 'peer', self::peer($c), $c);
+        $this->broadcast($key, 'peer', self::peer($c), $c);
     }
 
     public function leave(Client $c, string $zone): void
     {
+        $zone = self::room($c->profile, $zone);
         if (isset($this->zones[$zone][$c->id])) {
             unset($this->zones[$zone][$c->id]);
             $this->broadcast($zone, 'gone', ['id' => $c->id]);
@@ -125,13 +133,14 @@ final class Presence
     public function moved(Client $c): void
     {
         if ($c->profile !== null) {
-            $this->broadcast($c->profile->zone, 'peer', self::peer($c), $c);
+            $this->broadcast(self::room($c->profile, $c->profile->zone), 'peer', self::peer($c), $c);
         }
     }
 
     public function sameZone(Client $a, Client $b): bool
     {
-        return $a->profile !== null && $b->profile !== null && $a->profile->zone === $b->profile->zone;
+        return $a->profile !== null && $b->profile !== null
+            && self::room($a->profile, $a->profile->zone) === self::room($b->profile, $b->profile->zone);
     }
 
     public function count(): int

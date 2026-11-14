@@ -167,6 +167,17 @@ final class Kin
         if ($info->evolvesTo === null || $this->level < $info->evolveLevel) {
             return null;
         }
+
+        return $this->evolveNow();
+    }
+
+    /** Évolue tout de suite (pierre d'éveil) ; renvoie l'ancienne espèce ou null si elle n'évolue pas. */
+    public function evolveNow(): ?int
+    {
+        $info = $this->info();
+        if ($info->evolvesTo === null) {
+            return null;
+        }
         $from = $this->species;
         $ratio = $this->hp / max(1, $this->maxHp());
         $this->species = $info->evolvesTo;

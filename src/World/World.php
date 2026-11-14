@@ -26,6 +26,11 @@ final class World
     final public const int GH = 15;
     final public const string START = 't1';
     final public const int IW = 11;
+    /** Ce qu'offre l'habitant de la seconde maison de chaque ville. */
+    private const array HOUSE_GIFTS = [
+        2 => Item::CutCapsule, 3 => Item::Bike, 4 => Item::Ct04, 5 => Item::SurfCapsule, 6 => Item::Charm,
+        7 => Item::Ct07, 8 => Item::AwakeStone, 9 => Item::Ct09, 10 => Item::RareCandy,
+    ];
     final public const int IH = 9;
 
     /**
@@ -364,6 +369,8 @@ final class World
                 }
             }
         }
+        // une cachette derrière un petit buisson (capsule spéciale Coupe), à partir de la route 2
+        $pocket = $r >= 2 ? self::carvePocket($g, $rng, $h) : null;
         $npcs = [];
         if ($r >= 2) {
             $g->set(12, $h - 4, Tile::TREE);
@@ -411,12 +418,103 @@ final class World
                 $npcs[] = new Npc("r$r.item$k", 'item', $spot[0], $spot[1], 'd', 0, 'item', item: $items[($k + $r) % count($items)]);
             }
         }
+        // objets rares : dans la cachette, et au milieu d'une mare (capsule spéciale Surf)
+        $rare = [Item::RareCandy, Item::Ct05, Item::AwakeStone, Item::Ct08, Item::RareCandy, Item::Ct06, Item::Ct01, Item::AwakeStone];
+        if ($pocket !== null) {
+            $npcs[] = new Npc("r$r.hidden", 'item', $pocket[0], $pocket[1], 'd', 0, 'item', item: $rare[($r - 2) % count($rare)]);
+        }
+        $lake = self::lakeSpot($rows, $npcs, $h);
+        if ($lake !== null) {
+            $wet = [Item::Ct02, Item::RareCandy, Item::Ct03, Item::AwakeStone, Item::Ct09, Item::RareCandy, Item::Ct07, Item::Ct04, Item::RareCandy];
+            $npcs[] = new Npc("r$r.lake", 'item', $lake[0], $lake[1], 'd', 0, 'item', item: $wet[($r - 1) % count($wet)]);
+        }
         $warps = [
             new Warp(11, $h - 1, "t$r", 14, 1), new Warp(12, $h - 1, "t$r", 15, 1),
             new Warp(11, 0, 't' . ($r + 1), 14, self::TH - 2), new Warp(12, 0, 't' . ($r + 1), 15, self::TH - 2),
         ];
 
         return new Zone("r$r", ['fr' => "Route $r", 'en' => "Route $r"], 'route', $r, $rows, $warps, $npcs, self::encounters($r), $r);
+    }
+
+    /**
+     * Creuse une cachette : depuis une case d'herbe rase, trois arbres alignés deviennent buisson, herbe, herbe ;
+     * les arbres autour de la cachette restent, on n'y entre qu'en taillant le buisson. Renvoie la case de l'objet.
+     *
+     * @return array{0: int, 1: int}|null
+     */
+    private static function carvePocket(Grid $g, Randomizer $rng, int $h): ?array
+    {
+        $candidates = [];
+        for ($y = 4; $y < $h - 9; $y++) {
+            for ($x = 1; $x < $g->w - 1; $x++) {
+                if ($g->get($x, $y) !== Tile::GROUND) {
+                    continue;
+                }
+                foreach ([-1, 1] as $dx) {
+                    $ok = true;
+                    for ($k = 1; $k <= 4 && $ok; $k++) {
+                        $cx = $x + $dx * $k;
+                        $ok = $cx > 0 && $cx < $g->w - 1 && $g->get($cx, $y) === Tile::TREE
+                            && ($k === 1 || ($g->get($cx, $y - 1) === Tile::TREE && $g->get($cx, $y + 1) === Tile::TREE));
+                    }
+                    if ($ok) {
+                        $candidates[] = [$x, $y, $dx];
+                    }
+                }
+            }
+        }
+        if ($candidates === []) {
+            return null;
+        }
+        [$x, $y, $dx] = $candidates[$rng->getInt(0, count($candidates) - 1)];
+        $g->set($x + $dx, $y, Tile::BUSH);
+        $g->set($x + 2 * $dx, $y, Tile::GROUND);
+        $g->set($x + 3 * $dx, $y, Tile::GROUND);
+
+        return [$x + 3 * $dx, $y];
+    }
+
+    /**
+     * Le point d'eau le plus éloigné de la rive, dans une mare qui touche une case où l'on peut marcher.
+     *
+     * @param list<string> $rows
+     * @param list<Npc> $npcs
+     * @return array{0: int, 1: int}|null
+     */
+    private static function lakeSpot(array $rows, array $npcs, int $h): ?array
+    {
+        $blocked = [];
+        foreach ($npcs as $npc) {
+            if ($npc->kind !== 'guard') {
+                $blocked["{$npc->x},{$npc->y}"] = true;
+            }
+        }
+        $reach = Grid::reachable($rows, 11, $h - 2, $blocked);
+        $queue = [];
+        $seen = [];
+        foreach (array_keys($reach) as $key) {
+            [$x, $y] = array_map(intval(...), explode(',', $key));
+            foreach ([[1, 0], [-1, 0], [0, 1], [0, -1]] as [$dx, $dy]) {
+                $k = ($x + $dx) . ',' . ($y + $dy);
+                if (($rows[$y + $dy][$x + $dx] ?? '') === Tile::WATER && !isset($seen[$k])) {
+                    $seen[$k] = true;
+                    $queue[] = [$x + $dx, $y + $dy];
+                }
+            }
+        }
+        $last = null;
+        for ($q = 0; $q < count($queue); $q++) {
+            [$x, $y] = $last = $queue[$q];
+            foreach ([[1, 0], [-1, 0], [0, 1], [0, -1]] as [$dx, $dy]) {
+                $k = ($x + $dx) . ',' . ($y + $dy);
+                if (!isset($seen[$k]) && ($rows[$y + $dy][$x + $dx] ?? '') === Tile::WATER) {
+                    $seen[$k] = true;
+                    $queue[] = [$x + $dx, $y + $dy];
+                }
+            }
+        }
+
+        return $last;
     }
 
     /**
@@ -631,7 +729,15 @@ final class World
             $g->set(1, $h - 2, Tile::PLANT);
             $home = $town === 1 && $slot === 'a';
             $text = $home ? 'home' : 'talk' . (($town * 2 + ($slot === 'a' ? 7 : 0)) % 20);
-            $npcs[] = new Npc("$id.talk", 'talk', $mid - 2, 3, 'r', 3 + ($town + ($slot === 'a' ? 2 : 0)) % 5, $text);
+            $sprite = 3 + ($town + ($slot === 'a' ? 2 : 0)) % 5;
+            $gift = $slot === 'b' ? self::HOUSE_GIFTS[$town] ?? null : ($town === self::TOWNS ? Item::Ct10 : null);
+            $npcs[] = $gift !== null
+                ? new Npc("$id.gift", 'gift', $mid - 2, 3, 'r', $sprite, 'gift', item: $gift)
+                : new Npc("$id.talk", 'talk', $mid - 2, 3, 'r', $sprite, $text);
+            if ($slot === 'b' && $town >= 2) {
+                $loot = [Item::Ct11, Item::Ct01, Item::RareCandy, Item::Ct03, Item::Ct06, Item::AwakeStone, Item::Ct12, Item::Ct05, Item::RareCandy];
+                $npcs[] = new Npc("$id.item", 'item', $w - 3, $h - 3, 'd', 0, 'item', item: $loot[($town - 2) % count($loot)]);
+            }
             $name = ['fr' => $home ? 'Ta maison' : "Maison · {$townName['fr']}", 'en' => $home ? 'Your home' : "{$townName['en']} House"];
         }
         $front = match (true) {

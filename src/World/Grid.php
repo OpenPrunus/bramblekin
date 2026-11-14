@@ -53,9 +53,10 @@ final class Grid
      *
      * @param list<string> $rows
      * @param array<string, true> $blocked
+     * @param string $extra cases franchissables en plus (capacités du joueur : buisson, eau)
      * @return array<string, true>
      */
-    public static function reachable(array $rows, int $x, int $y, array $blocked = []): array
+    public static function reachable(array $rows, int $x, int $y, array $blocked = [], string $extra = ''): array
     {
         $seen = ["$x,$y" => true];
         $queue = [[$x, $y]];
@@ -65,7 +66,9 @@ final class Grid
                 $nx = $cx + $dx;
                 $ny = $cy + $dy;
                 $key = "$nx,$ny";
-                if ($nx < 0 || $ny < 0 || isset($seen[$key]) || isset($blocked[$key]) || !Tile::walkable(substr($rows[$ny] ?? '', $nx, 1))) {
+                $t = $nx < 0 || $ny < 0 ? '' : substr($rows[$ny] ?? '', $nx, 1);
+                $open = Tile::walkable($t) || ($t !== '' && str_contains($extra, $t));
+                if ($nx < 0 || $ny < 0 || isset($seen[$key]) || isset($blocked[$key]) || !$open) {
                     continue;
                 }
                 $seen[$key] = true;

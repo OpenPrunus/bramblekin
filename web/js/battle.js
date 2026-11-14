@@ -7,7 +7,7 @@ import { sfx } from './audio.js';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const W = 256;
 const H = 144;
-const RES = 4;                 // le canvas est en 1024 × 576 ; on dessine en coordonnées 256 × 144
+const RES = 5;                 // le canvas est en 1280 × 720 ; on dessine en coordonnées 256 × 144
 
 export class BattleView {
   constructor(root, { content, send, onClose, fast = false }) {
@@ -327,8 +327,8 @@ export class BattleView {
     for (const it of this.content.items) {
       const n = items[it.id] ?? 0;
       if (!n) continue;
-      const orb = it.id.startsWith('orb');
-      if (this.kind === 'duel' || (orb && this.kind !== 'wild')) continue;
+      const orb = it.kind === 'orb';
+      if (this.kind === 'duel' || (orb && this.kind !== 'wild') || (!orb && it.kind !== 'heal')) continue;
       any = true;
       this.button(`${pick(it.name)} <small>×${n}</small>`, () => {
         if (orb) this.act({ k: 'catch', item: it.id });
@@ -531,6 +531,10 @@ export class BattleView {
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, W, H);
     if (!inside) {
+      // soleil voilé
+      const sun = ctx.createRadialGradient(220, 18, 2, 220, 18, 70);
+      sun.addColorStop(0, 'rgba(255,250,220,0.95)'); sun.addColorStop(0.15, 'rgba(255,245,200,0.5)'); sun.addColorStop(1, 'rgba(255,245,200,0)');
+      ctx.fillStyle = sun; ctx.fillRect(0, 0, W, H);
       ctx.fillStyle = 'rgba(255,255,255,0.8)';
       for (let i = 0; i < 4; i++) {
         const cx = ((i * 83 + now / 400) % (W + 60)) - 30; const cy = 14 + (i % 2) * 10;
@@ -541,6 +545,14 @@ export class BattleView {
         ctx.beginPath(); ctx.moveTo(0, H);
         for (let x = 0; x <= W; x += 4) ctx.lineTo(x, base - Math.sin(x * f + base) * amp - Math.sin(x * f * 2.3) * amp * 0.4);
         ctx.lineTo(W, H); ctx.fill();
+      }
+      // lisière de forêt au loin
+      for (let x = -6; x < W + 6; x += 7) {
+        const h = 6 + Math.sin(x * 0.37) * 2 + Math.sin(x * 0.11) * 3;
+        const g = ctx.createRadialGradient(x - 1, 82 - h, 0.5, x, 84 - h * 0.6, h);
+        g.addColorStop(0, shade(th.t, 0.15)); g.addColorStop(1, shade(th.td, -0.1));
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.ellipse(x, 86 - h * 0.5, 5, h, 0, 0, Math.PI * 2); ctx.fill();
       }
     } else {
       ctx.fillStyle = 'rgba(255,220,160,0.12)';
@@ -558,6 +570,19 @@ export class BattleView {
       ctx.beginPath(); ctx.ellipse(cx + 3, cy + 4, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = g;
       ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+      // touffes d'herbe sur le bord des plateformes
+      if (!inside) {
+        ctx.strokeStyle = shade(th.td, 0.1);
+        ctx.lineWidth = 0.6;
+        for (let k = 0; k < 40; k++) {
+          const a = (k / 40) * Math.PI * 2;
+          const bx = cx + Math.cos(a) * rx * 0.97; const by = cy + Math.sin(a) * ry * 0.97;
+          const sway = Math.sin(now / 600 + k) * 0.6;
+          ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + sway - 0.5, by - 2.6 - (k % 3)); ctx.stroke();
+        }
+        ctx.fillStyle = 'rgba(255,255,255,0.22)';
+        ctx.beginPath(); ctx.ellipse(cx - rx * 0.25, cy - ry * 0.35, rx * 0.45, ry * 0.25, 0, 0, Math.PI * 2); ctx.fill();
+      }
     }
     if (this.anim.trainer) {
       ctx.drawImage(characterCanvas(palette('npc', this.anim.trainer.sprite), 'd', 0), 166, 10, 42, 56);

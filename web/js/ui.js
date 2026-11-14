@@ -46,7 +46,7 @@ export class Panels {
   open(tab, data) {
     this.current = tab;
     this.sheet.hidden = false;
-    const menuTabs = ['team', 'bag', 'dex', 'map', 'ranking', 'code', 'options'];
+    const menuTabs = ['team', 'bag', 'dex', 'map', 'ranking', 'code', 'options'].filter((k) => k !== 'map' || (this.app.profile?.items.map ?? 0) > 0);
     this.tabs.innerHTML = menuTabs.includes(tab)
       ? menuTabs.map((k) => `<button type="button" data-tab="${k}" class="${k === tab ? 'on' : ''}">${esc(t(k))}</button>`).join('')
       : `<h2>${esc(t(tab === 'shop' ? 'shop' : tab === 'box' ? 'pc' : tab))}</h2>`;
@@ -134,21 +134,61 @@ export class Panels {
 
   render_bag() {
     const p = this.app.profile;
-    const ul = document.createElement('ul');
-    ul.className = 'bag';
-    let any = false;
-    for (const it of this.app.content.items) {
-      const n = p.items[it.id] ?? 0;
-      if (!n) continue;
-      any = true;
-      ul.insertAdjacentHTML('beforeend', `<li><span class="item-ico i-${it.id.replace(/\d/, '')}"></span>${esc(pick(it.name))}<b>×${n}</b></li>`);
-    }
     this.body.insertAdjacentHTML('beforeend', `<p class="money">${t('money', { n: p.money })} · ${t('badges', { n: p.badges.length })}</p>`);
     const badges = document.createElement('div');
     badges.className = 'badges';
     for (let b = 1; b <= 8; b++) badges.insertAdjacentHTML('beforeend', `<span class="badge ${p.badges.includes(b) ? 'on' : ''} b${b}" title="${esc(t(`badge${b}`))}"></span>`);
     this.body.append(badges);
-    this.body.append(any ? ul : Object.assign(document.createElement('p'), { textContent: t('nothing') }));
+    let any = false;
+    for (const kind of ['key', 'heal', 'orb', 'ct', 'rare']) {
+      const list = this.app.content.items.filter((it) => it.kind === kind && (p.items[it.id] ?? 0) > 0);
+      if (!list.length) continue;
+      any = true;
+      this.body.insertAdjacentHTML('beforeend', `<h4>${esc(t(`bag_${kind}`))}</h4>`);
+      const ul = document.createElement('ul');
+      ul.className = 'bag';
+      for (const it of list) {
+        const li = document.createElement('li');
+        li.innerHTML = `<span class="item-ico i-${it.id.replace(/\d/g, '').replace('cs_cut', 'cs').replace('cs_surf', 'cs')}"></span><span class="nm"><b>${esc(pick(it.name))}</b>${kind === 'key' ? '' : ` <small>×${p.items[it.id]}</small>`}<br><small class="desc">${esc(pick(it.desc))}</small></span>`;
+        const usable = kind === 'heal' || kind === 'ct' || kind === 'rare' || it.id === 'bike' || it.id === 'map';
+        if (usable) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = it.id === 'bike' ? (p.riding ? t('bikeOff') : t('use')) : t('use');
+          b.addEventListener('click', () => {
+            if (it.id === 'map') this.open('map');
+            else if (it.id === 'bike') { this.app.send({ t: 'use', item: 'bike' }); this.close(); }
+            else this.chooseKin(it);
+          });
+          li.append(b);
+        }
+        ul.append(li);
+      }
+      this.body.append(ul);
+    }
+    if (!any) this.body.append(Object.assign(document.createElement('p'), { textContent: t('nothing') }));
+  }
+
+  /** Choisir la créature sur laquelle utiliser un objet (soin, capsule technique, objet rare). */
+  chooseKin(it) {
+    this.body.innerHTML = `<h4>${esc(pick(it.name))}</h4><p>${esc(t('useOn'))}</p>`;
+    const list = document.createElement('div');
+    list.className = 'kin-list';
+    for (const k of this.app.profile.team) {
+      const sp = this.species(k.sp);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'kin-mini';
+      b.append(kinImg(sp));
+      b.insertAdjacentHTML('beforeend', `<span>${esc(sp.name)} <small>${t('lv', { n: k.lv })} · ${k.hp}/${k.max}</small></span>`);
+      b.addEventListener('click', () => { this.app.send({ t: 'use', item: it.id, uid: k.uid }); this.open('bag'); });
+      list.append(b);
+    }
+    this.body.append(list);
+    const back = document.createElement('button');
+    back.type = 'button'; back.textContent = `← ${t('back')}`;
+    back.addEventListener('click', () => this.open('bag'));
+    this.body.append(back);
   }
 
   render_dex() {
@@ -158,12 +198,23 @@ export class Panels {
     this.body.insertAdjacentHTML('beforeend', `<p>${t('dexCount', { seen, caught })}</p>`);
     const grid = document.createElement('div');
     grid.className = 'dex-grid';
+    // les 150 portraits sont calculés par lots, sans figer l'écran
+    const queue = [];
+    const drain = () => {
+      if (this.current !== 'dex') return;
+      const t0 = performance.now();
+      while (queue.length && performance.now() - t0 < 12) queue.shift()();
+      if (queue.length) requestAnimationFrame(drain);
+    };
+    requestAnimationFrame(drain);
     for (const sp of this.app.content.species) {
       const state = dex[sp.id] ?? 0;
       const b = document.createElement('button');
       b.type = 'button';
       b.className = `dex-cell s${state}`;
-      b.append(state ? kinImg(sp) : kinImg(sp, '', true));
+      const slot = kinImg(null);
+      b.append(slot);
+      queue.push(() => slot.getContext('2d').drawImage(creatureCanvas(sp, { silhouette: !state }), 0, 0));
       b.insertAdjacentHTML('beforeend', `<small>${String(sp.id).padStart(3, '0')}</small>`);
       b.addEventListener('click', () => this.dexDetail(sp, state));
       grid.append(b);
@@ -426,7 +477,7 @@ export class Panels {
     const portrait = box.querySelector('.prof-portrait');
     const face = document.createElement('canvas');
     face.width = 48; face.height = 64;
-    face.getContext('2d').drawImage(characterCanvas(palette('prof', 0), 'd', 0), 0, 0);
+    face.getContext('2d').drawImage(characterCanvas(palette('prof', 0), 'd', 0), 0, 0, 48, 64);
     portrait.append(face);
     const kins = box.querySelector('.intro-kins');
     for (const id of [1, 4, 7, 22, 49]) kins.append(kinImg(this.species(id)));

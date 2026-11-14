@@ -70,7 +70,7 @@ final class Battle
         return match ($a->kind) {
             'move' => $this->validMove($me->kin(), $a->index) ? null : 'bad_move',
             'switch' => $me->canSwitchTo($a->index) ? null : 'bad_switch',
-            'item' => $this->kind === Kind::Duel || $a->item === null || $a->item->isOrb() || !isset($me->team[$a->index])
+            'item' => $this->kind === Kind::Duel || $a->item === null || !$a->item->usableInBattle() || !isset($me->team[$a->index])
                 ? 'bad_item' : $this->itemUseful($a->item, $me->team[$a->index]),
             'catch' => $this->kind !== Kind::Wild || $a->item === null || !$a->item->isOrb() ? 'no_catch' : null,
             'run' => $this->kind !== Kind::Wild ? 'no_run' : null,

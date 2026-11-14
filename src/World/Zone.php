@@ -74,9 +74,10 @@ final class Zone
      * Une case libre pour ce joueur (les personnages visibles bloquent le passage).
      * @param callable(Npc): bool $visible
      */
-    public function free(int $x, int $y, callable $visible): bool
+    public function free(int $x, int $y, callable $visible, bool $cut = false, bool $surf = false): bool
     {
-        if (!Tile::walkable($this->tile($x, $y))) {
+        $tile = $this->tile($x, $y);
+        if (!Tile::walkable($tile) && !($cut && $tile === Tile::BUSH) && !($surf && $tile === Tile::WATER)) {
             return false;
         }
         foreach ($this->npcs as $npc) {

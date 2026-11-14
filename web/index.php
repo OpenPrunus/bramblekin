@@ -27,7 +27,7 @@ $ws = (string) getenv('BRAMBLE_WS');
 
   <div id="hud" hidden>
     <div class="hud-left"><span id="hud-zone"></span><span id="hud-online"></span></div>
-    <div class="hud-right"><span id="hud-money"></span><button type="button" id="btn-emote" aria-label="Émotions" data-i18n-aria="emotes">☺</button><button type="button" id="btn-menu"></button></div>
+    <div class="hud-right"><span id="hud-money"></span><button type="button" id="btn-bike" hidden aria-label="Vélo" data-i18n-aria="bike">🚲</button><button type="button" id="btn-emote" aria-label="Émotions" data-i18n-aria="emotes">☺</button><button type="button" id="btn-menu"></button></div>
   </div>
   <div id="banner" hidden></div>
 

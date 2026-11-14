@@ -100,7 +100,7 @@ final class WorldTest extends TestCase
                 'inside' => [World::IW >> 1, World::IH - 2],
                 default => [6, $zone->height() - 2],
             };
-            $reach = Grid::reachable($zone->rows, $x, $y, self::blocked($zone, true));
+            $reach = Grid::reachable($zone->rows, $x, $y, self::blocked($zone, true), Tile::BUSH . Tile::WATER);
             foreach ($zone->npcs as $npc) {
                 $ok = false;
                 foreach ([[1, 0], [-1, 0], [0, 1], [0, -1]] as [$dx, $dy]) {
@@ -158,6 +158,48 @@ final class WorldTest extends TestCase
             self::assertNotNull($center);
             self::assertSame(Tile::COUNTER, $center->tile($hx, $hy - 1));
             self::assertSame('nurse', $center->npc("c$t.nurse")?->kind);
+        }
+    }
+
+    public function testHiddenItemsNeedTheSpecialCapsules(): void
+    {
+        $hidden = 0;
+        $lakes = 0;
+        for ($r = 1; $r <= 9; $r++) {
+            $zone = World::zone("r$r");
+            self::assertNotNull($zone);
+            $start = [11, $zone->height() - 2];
+            $plain = Grid::reachable($zone->rows, $start[0], $start[1], self::blocked($zone, true));
+            $cut = Grid::reachable($zone->rows, $start[0], $start[1], self::blocked($zone, true), Tile::BUSH);
+            foreach ($zone->npcs as $npc) {
+                $next = static fn (array $set): bool => array_any(
+                    [[1, 0], [-1, 0], [0, 1], [0, -1]],
+                    static fn (array $d): bool => isset($set[($npc->x + $d[0]) . ',' . ($npc->y + $d[1])]),
+                );
+                if ($npc->id === "r$r.hidden") {
+                    $hidden++;
+                    self::assertFalse($next($plain) || isset($plain["{$npc->x},{$npc->y}"]), "cachette de la route $r atteignable sans couper");
+                    self::assertTrue($next($cut), "cachette de la route $r atteignable en coupant");
+                }
+                if ($npc->id === "r$r.lake") {
+                    $lakes++;
+                    self::assertSame(Tile::WATER, $zone->tile($npc->x, $npc->y));
+                }
+            }
+        }
+        self::assertSame(8, $hidden, 'une cachette sur chaque route à partir de la 2e');
+        self::assertGreaterThan(3, $lakes);
+        // les dons des habitants : vélo, capsules spéciales, talisman
+        $gifts = [];
+        foreach (World::zones() as $zone) {
+            foreach ($zone->npcs as $npc) {
+                if ($npc->kind === 'gift' && $npc->item !== null) {
+                    $gifts[] = $npc->item->value;
+                }
+            }
+        }
+        foreach (['bike', 'cs_cut', 'cs_surf', 'charm'] as $key) {
+            self::assertContains($key, $gifts);
         }
     }
 

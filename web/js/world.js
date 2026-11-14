@@ -19,6 +19,8 @@ export class World {
     this.time = 0;
     this.look = 0;
     this.myId = 0;
+    this.abilities = { cut: false, surf: false };
+    this.riding = false;
     this.resize();
   }
 
@@ -68,7 +70,14 @@ export class World {
 
   isWarp(x, y) { return this.warps?.has(`${x},${y}`) ?? false; }
 
-  free(x, y) { return WALKABLE.has(this.tile(x, y)) && !this.npcAt(x, y); }
+  /** Capacités du joueur (capsules spéciales) : tailler les buissons, nager. */
+  free(x, y) {
+    const t = this.tile(x, y);
+    const ok = WALKABLE.has(t) || (t === 'x' && this.abilities.cut) || (t === '~' && this.abilities.surf);
+    return ok && !this.npcAt(x, y);
+  }
+
+  get stepMs() { return this.riding ? STEP_MS / 2 : STEP_MS; }
 
   removeNpc(id) {
     if (this.zone) this.zone.npcs = this.zone.npcs.filter((n) => n.id !== id);
@@ -100,7 +109,7 @@ export class World {
       old.fromY = near ? old.y : p.y;
       old.t = near ? 0 : 1;
       if (near) old.walk = (old.walk + 1) % 2;
-      Object.assign(old, { x: p.x, y: p.y, d: p.d, look: p.look, busy: p.busy, name: p.name });
+      Object.assign(old, { x: p.x, y: p.y, d: p.d, look: p.look, busy: p.busy, name: p.name, bike: p.bike });
     } else {
       this.peers.set(p.id, { ...p, fromX: p.x, fromY: p.y, t: 1, walk: 0 });
     }
@@ -156,10 +165,10 @@ export class World {
     let arrived = false;
     const m = this.me;
     if (m?.moving) {
-      m.t += dt / STEP_MS;
+      m.t += dt / this.stepMs;
       if (m.t >= 1) { m.t = 1; m.moving = false; arrived = true; }
     }
-    for (const p of this.peers.values()) if (p.t < 1) p.t = Math.min(1, p.t + dt / STEP_MS);
+    for (const p of this.peers.values()) if (p.t < 1) p.t = Math.min(1, p.t + dt / (p.bike ? STEP_MS / 2 : STEP_MS));
     for (const [id, b] of this.bubbles) if (b.until < this.time) this.bubbles.delete(id);
     return arrived;
   }
@@ -192,7 +201,7 @@ export class World {
     if (!this.zone || !this.me) return;
     const { ox, oy, S } = this.camera();
     const k = S / T;
-    ctx.drawImage(this.map, ox, oy, this.map.width * k, this.map.height * k);
+    ctx.drawImage(this.map, ox, oy, this.width * S, this.height * S);
     // eau et herbes hautes animées (seulement à l'écran)
     const vis = (x, y) => ox + (x + 1) * S > 0 && ox + x * S < this.canvas.width && oy + (y + 1) * S > 0 && oy + (y - 1) * S < this.canvas.height;
     for (const [x, y, ch] of this.special) {
@@ -217,8 +226,23 @@ export class World {
       const moving = th.kind === 'me' ? m.moving : who.t < 1;
       const frameNo = moving && t > 0.2 && t < 0.8 ? 1 + who.walk : 0;
       const look = th.kind === 'me' ? this.look : who.look;
-      this.shadow(sx, sy, k);
-      ctx.drawImage(characterCanvas(palette('player', look), who.d, frameNo), sx, sy - (CHAR_H - T) * k, CHAR_W * k, CHAR_H * k);
+      const tx0 = Math.round(th.x); const ty0 = Math.round(th.y);
+      const swimming = this.tile(tx0, ty0) === '~';
+      const bike = th.kind === 'me' ? this.riding : who.bike;
+      if (swimming) {
+        // on nage : seul le haut du corps dépasse, avec des ronds dans l'eau
+        ctx.save();
+        ctx.beginPath(); ctx.rect(sx - S, sy - S, S * 3, S * 1.35); ctx.clip();
+        ctx.drawImage(characterCanvas(palette('player', look), who.d, 0), sx, sy - (CHAR_H - T) * k + 14 * k, CHAR_W * k, CHAR_H * k);
+        ctx.restore();
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2 * k;
+        const r = (this.time / 40) % 14;
+        ctx.beginPath(); ctx.ellipse(sx + 24 * k, sy + 34 * k, (14 + r) * k, (5 + r * 0.3) * k, 0, 0, Math.PI * 2); ctx.stroke();
+      } else {
+        this.shadow(sx, sy, k);
+        if (bike) this.drawBike(sx, sy, k, who.d);
+        ctx.drawImage(characterCanvas(palette('player', look), who.d, bike ? 0 : frameNo), sx, sy - (CHAR_H - T) * k - (bike ? 6 * k : 0), CHAR_W * k, CHAR_H * k);
+      }
       // les hautes herbes cachent les jambes
       const tx = Math.round(th.x); const ty = Math.round(th.y);
       if (this.tile(tx, ty) === '"') drawGrass(ctx, ox + tx * S, oy + ty * S, k, this.th, this.time, tx, ty, true);
@@ -258,6 +282,22 @@ export class World {
     }
   }
 
+  /** Un vélo sous le personnage (de profil ou de face selon la direction). */
+  drawBike(sx, sy, k, d) {
+    const ctx = this.ctx;
+    ctx.lineWidth = 2.5 * k;
+    ctx.strokeStyle = '#2b2a3a';
+    if (d === 'l' || d === 'r') {
+      for (const wx of [12, 36]) { ctx.beginPath(); ctx.arc(sx + wx * k, sy + 40 * k, 8 * k, 0, Math.PI * 2); ctx.stroke(); }
+      ctx.strokeStyle = '#e0525b';
+      ctx.beginPath(); ctx.moveTo(sx + 12 * k, sy + 40 * k); ctx.lineTo(sx + 22 * k, sy + 30 * k); ctx.lineTo(sx + 36 * k, sy + 40 * k); ctx.lineTo(sx + 28 * k, sy + 28 * k); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.roundRect(sx + 21 * k, sy + 32 * k, 6 * k, 16 * k, 3 * k); ctx.stroke();
+      ctx.strokeStyle = '#e0525b';
+      ctx.beginPath(); ctx.moveTo(sx + 12 * k, sy + 30 * k); ctx.lineTo(sx + 36 * k, sy + 30 * k); ctx.stroke();
+    }
+  }
+
   shadow(sx, sy, k) {
     const ctx = this.ctx;
     ctx.fillStyle = 'rgba(0,0,0,0.22)';
@@ -269,6 +309,22 @@ export class World {
     const W = this.canvas.width; const H = this.canvas.height;
     const z = this.zone;
     const inside = z.kind === 'inside' || z.kind === 'gym';
+    if (!inside) {
+      // ombres de nuages qui glissent sur la carte, et lumière chaude venant d'en haut à gauche
+      const { ox, oy, S } = this.camera();
+      for (let i = 0; i < 4; i++) {
+        const wx = ((hash(i, 9) * this.width + this.time / 2600 * (0.6 + hash(i, 4))) % (this.width + 16)) - 8;
+        const wy = hash(9, i) * this.height;
+        const cx = ox + wx * S; const cy = oy + wy * S; const r = S * (4 + hash(i, i) * 3);
+        const g = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r);
+        g.addColorStop(0, 'rgba(20,40,60,0.13)'); g.addColorStop(1, 'rgba(20,40,60,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.ellipse(cx, cy, r * 1.4, r, 0, 0, Math.PI * 2); ctx.fill();
+      }
+      const sun = ctx.createLinearGradient(0, 0, W, H);
+      sun.addColorStop(0, 'rgba(255,240,200,0.14)'); sun.addColorStop(0.5, 'rgba(255,240,200,0)');
+      ctx.fillStyle = sun; ctx.fillRect(0, 0, W, H);
+    }
     const v = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
     v.addColorStop(0, 'rgba(0,0,0,0)');
     v.addColorStop(1, inside ? 'rgba(40,20,10,0.35)' : 'rgba(10,30,40,0.28)');

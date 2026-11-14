@@ -34,7 +34,7 @@ const PLANS = {
   spirit: ['floater', 'floater', 'blob'],
 };
 
-const R = 4;                 // les formes sont décrites sur 32 × 32 puis tracées en 128 × 128 (rendu lisse)
+const R = 6;                 // les formes sont décrites sur 32 × 32 puis tracées en 192 × 192 (rendu lisse)
 const N = 32 * R;
 // matières : 0 vide, 1 corps, 2 ventre, 3 accent (2e type), 4 blanc d'œil, 5 pupille, 6 bouche, 7 ornement du 1er type, 8 ornement clair
 function blank() { return new Uint8Array(N * N); }
@@ -283,7 +283,22 @@ export function creatureCanvas(sp, { silhouette = false } = {}) {
   const ctx = c.getContext('2d');
   const img = ctx.createImageData(N, N);
   const px = img.data;
-  const H = (i) => Math.sqrt(Math.min(din[i], 22) / 22);
+  // relief lissé (flou en boîte sur la distance au bord) : pas de stries en étoile
+  let hmap = new Float32Array(N * N);
+  for (let i = 0; i < N * N; i++) hmap[i] = solid[i] ? Math.sqrt(Math.min(din[i], 33) / 33) : 0;
+  for (let pass = 0; pass < 3; pass++) {
+    const next = new Float32Array(N * N);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      let sum = 0; let n = 0;
+      for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+        const xx = x + dx; const yy = y + dy;
+        if (xx >= 0 && yy >= 0 && xx < N && yy < N) { sum += hmap[yy * N + xx]; n++; }
+      }
+      next[y * N + x] = sum / n;
+    }
+    hmap = next;
+  }
+  const H = (i) => hmap[i];
   const L = [-0.48, -0.62, 0.62];
   const outline = rgb(dark).map((v) => v * 0.45);
   const spirit = sp.types[0] === 'spirit';
@@ -291,8 +306,8 @@ export function creatureCanvas(sp, { silhouette = false } = {}) {
     const i = y * N + x;
     const o = i * 4;
     if (!solid[i]) {
-      if (dout[i] <= 2.6) {
-        const a = Math.max(0, Math.min(1, 2.6 - dout[i]));
+      if (dout[i] <= 3.4) {
+        const a = Math.max(0, Math.min(1, 3.4 - dout[i]));
         const col = silhouette ? [44, 42, 56] : outline;
         px[o] = col[0]; px[o + 1] = col[1]; px[o + 2] = col[2]; px[o + 3] = Math.round(a * 255);
       }
@@ -302,18 +317,21 @@ export function creatureCanvas(sp, { silhouette = false } = {}) {
     const m = g[i];
     const hx = H(Math.min(N * N - 1, i + 1)) - H(Math.max(0, i - 1));
     const hy = H(Math.min(N * N - 1, i + N)) - H(Math.max(0, i - N));
-    let nx = -hx * 6; let ny = -hy * 6; let nz = 1;
+    let nx = -hx * 9; let ny = -hy * 9; let nz = 1;
     const len = Math.hypot(nx, ny, nz); nx /= len; ny /= len; nz /= len;
     const diff = Math.max(0, nx * L[0] + ny * L[1] + nz * L[2]);
     const hz = [L[0], L[1], L[2] + 1]; const hl = Math.hypot(...hz);
     const spec = Math.pow(Math.max(0, (nx * hz[0] + ny * hz[1] + nz * hz[2]) / hl), 36) * (m === 4 || m === 5 ? 0.1 : 0.35);
-    const ao = 0.78 + 0.22 * Math.min(1, din[i] / 5);
+    const ao = 0.78 + 0.22 * Math.min(1, din[i] / 7);
+    // contre-jour : un liseré clair sur les bords tournés vers la droite et le bas
+    const rim = Math.max(0, nx * 0.7 + ny * 0.5) * Math.max(0, 1 - din[i] / 6) * 0.45;
     const base = mat[m] ?? mat[1];
     const flat = m === 4 || m === 5 || m === 6;
     const k = flat ? 0.92 + diff * 0.1 : (0.5 + diff * 0.62) * ao;
-    px[o] = Math.min(255, base[0] * k + spec * 255);
-    px[o + 1] = Math.min(255, base[1] * k + spec * 255);
-    px[o + 2] = Math.min(255, base[2] * k + spec * 255);
+    const rr = flat ? 0 : rim;
+    px[o] = Math.min(255, base[0] * k + spec * 255 + rr * 200);
+    px[o + 1] = Math.min(255, base[1] * k + spec * 255 + rr * 225);
+    px[o + 2] = Math.min(255, base[2] * k + spec * 255 + rr * 255);
     px[o + 3] = spirit && y > N * 0.8 && m === 1 ? Math.round(255 * Math.max(0.35, (N - y) / (N * 0.2))) : 255;
   }
   ctx.putImageData(img, 0, 0);
@@ -422,9 +440,11 @@ function grad(ctx, y0, y1, c0, c1) {
 export function characterCanvas(pal, dir, frame = 0) {
   const key = `${pal.h}${pal.c}${pal.p}${pal.s}${pal.kind ?? ''}${dir}${frame}`;
   if (charCache.has(key)) return charCache.get(key);
+  const QC = 2;                                         // dessiné en double résolution
   const c = document.createElement('canvas');
-  c.width = CHAR_W; c.height = CHAR_H;
+  c.width = CHAR_W * QC; c.height = CHAR_H * QC;
   const ctx = c.getContext('2d');
+  ctx.scale(QC, QC);
   if (dir === 'r') { ctx.translate(CHAR_W, 0); ctx.scale(-1, 1); }
   const side = dir === 'l' || dir === 'r';
   const bob = frame ? -1.5 : 0;
@@ -485,6 +505,25 @@ export function characterCanvas(pal, dir, frame = 0) {
     ctx.beginPath(); ctx.arc(hx, hy - 6, 12.5, Math.PI, Math.PI * 2); ctx.fill();
     ctx.fillRect(side ? hx - 18 : hx - 14, hy - 7, side ? 18 : 28, 3);
   }
-  charCache.set(key, c);
-  return c;
+  // détails : col, ceinture, reflets des chaussures et des cheveux
+  if (!side && dir !== 'u') {
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.beginPath(); ctx.moveTo(19, 33 + bob); ctx.lineTo(24, 38 + bob); ctx.lineTo(29, 33 + bob); ctx.lineTo(27, 33 + bob); ctx.lineTo(24, 36 + bob); ctx.lineTo(21, 33 + bob); ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  ctx.fillRect(side ? 16 : 13, 46 + bob, side ? 17 : 22, 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.beginPath(); ctx.ellipse(hx - 5, hy - 9, 4, 1.6, -0.4, 0, Math.PI * 2); ctx.fill();
+  // contour sombre et doux autour de la silhouette
+  const out = document.createElement('canvas');
+  out.width = c.width; out.height = c.height;
+  const o = out.getContext('2d');
+  for (const [dx, dy] of [[-2, 0], [2, 0], [0, -2], [0, 2], [-1.5, -1.5], [1.5, 1.5], [-1.5, 1.5], [1.5, -1.5]]) o.drawImage(c, dx, dy);
+  o.globalCompositeOperation = 'source-in';
+  o.fillStyle = 'rgba(40,30,50,0.85)';
+  o.fillRect(0, 0, out.width, out.height);
+  o.globalCompositeOperation = 'source-over';
+  o.drawImage(c, 0, 0);
+  charCache.set(key, out);
+  return out;
 }

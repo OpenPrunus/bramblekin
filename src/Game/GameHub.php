@@ -190,7 +190,7 @@ final class GameHub implements Hub
         $profile = $this->store->load($id, $now) ?? new Profile($id, $name, $now);
         $profile->name = $name;
         $zone = World::zone($profile->zone);
-        if ($zone === null || !$zone->free($profile->x, $profile->y, Presence::visibleFor($profile))) {
+        if ($zone === null || !$zone->free($profile->x, $profile->y, Presence::visibleFor($profile), $profile->has(Item::CutCapsule), $profile->has(Item::SurfCapsule))) {
             [$profile->zone, $profile->x, $profile->y] = World::healSpot($profile->healTown);
         }
         $c->profile = $profile;
@@ -211,7 +211,9 @@ final class GameHub implements Hub
         return self::$content ??= [
             'species' => array_values(array_map(static fn ($s): array => $s->toClient(), Dex::all())),
             'moves' => (object) array_map(static fn ($m): array => $m->toClient(), Moves::all()),
-            'items' => array_map(static fn (Item $i): array => ['id' => $i->value, 'name' => $i->label(), 'price' => $i->price()], Item::cases()),
+            'items' => array_map(static fn (Item $i): array => [
+                'id' => $i->value, 'name' => $i->label(), 'price' => $i->price(), 'kind' => $i->kind(), 'desc' => $i->description(), 'move' => $i->move(),
+            ], Item::cases()),
             'chart' => Type::chart(),
             'towns' => Names::TOWNS,
             'starters' => Dex::STARTERS,
@@ -251,12 +253,13 @@ final class GameHub implements Hub
             return;
         }
         $t = SystemClock::seconds($this->clock) * 1000;
-        $c->stepCredits = min(4.0, $c->stepCredits + ($t - $c->lastStep) / max(1, $this->config->stepMs));
+        $stepMs = $p->riding ? intdiv($this->config->stepMs, 2) : $this->config->stepMs;     // à vélo : deux fois plus vite
+        $c->stepCredits = min(4.0, $c->stepCredits + ($t - $c->lastStep) / max(1, $stepMs));
         $c->lastStep = $t;
         $p->dir = $dir;
         [$dx, $dy] = self::DIRS[$dir];
         $zone = Presence::zoneOf($p);
-        if ($c->stepCredits < 1 || !$zone->free($p->x + $dx, $p->y + $dy, Presence::visibleFor($p))) {
+        if ($c->stepCredits < 1 || !$zone->free($p->x + $dx, $p->y + $dy, Presence::visibleFor($p), $p->has(Item::CutCapsule), $p->has(Item::SurfCapsule))) {
             $this->reject($c, $p, $seq);
             $this->presence->moved($c);
 
@@ -280,6 +283,10 @@ final class GameHub implements Hub
         if ($warp !== null) {
             $this->presence->leave($c, $zone->id);
             [$p->zone, $p->x, $p->y] = [$warp->zone, $warp->toX, $warp->toY];
+            if ($p->riding && !in_array(World::zone($p->zone)?->kind, ['town', 'route'], true)) {
+                $p->riding = false;                                   // on descend de vélo en entrant
+                $c->send('profile', ['profile' => $p->toClient()]);
+            }
             $this->presence->enter($c);
 
             return;
@@ -392,6 +399,17 @@ final class GameHub implements Hub
                     $c->send('starterPick', ['sp' => $npc->team[0][0]]);
                 }
                 break;
+            case 'gift':
+                if ($npc->item !== null && !isset($p->done[$npc->id])) {
+                    $p->done[$npc->id] = true;
+                    $p->give($npc->item);
+                    $c->dirty = true;
+                    $c->send('say', ['text' => 'gift_' . $npc->item->kind(), 'item' => $npc->item->value, 'gift' => true]);
+                    $c->send('profile', ['profile' => $p->toClient()]);
+                } else {
+                    $c->send('say', ['text' => 'giftAfter']);
+                }
+                break;
             case 'prof':
                 if (!$p->hasStarter()) {
                     $c->send('say', ['text' => 'labChoose']);
@@ -493,14 +511,24 @@ final class GameHub implements Hub
     private function useItem(Client $c, Profile $p, array $msg): void
     {
         $item = is_string($msg['item'] ?? null) ? Item::tryFrom($msg['item']) : null;
-        $why = $c->busy() || $item === null ? 'bad_item' : Fights::useOutside($p, $item, $this->int($msg, 'uid'));
-        if ($why !== null) {
-            $c->error($why);
+        if ($c->busy() || $item === null) {
+            $c->error('bad_item');
+
+            return;
+        }
+        $outdoors = in_array(Presence::zoneOf($p)->kind, ['town', 'route'], true);
+        $result = ItemUse::apply($p, $item, $this->int($msg, 'uid'), $outdoors);
+        if (is_string($result)) {
+            $c->error($result);
 
             return;
         }
         $c->dirty = true;
+        $c->send('used', ['item' => $item->value, 'log' => $result]);
         $c->send('profile', ['profile' => $p->toClient()]);
+        if ($item === Item::Bike) {
+            $this->presence->moved($c);
+        }
     }
 
     /**
@@ -551,7 +579,7 @@ final class GameHub implements Hub
             return;
         }
         $this->lastEmote[$c->id] = $now;
-        $this->presence->broadcast($p->zone, 'emote', ['id' => $c->id, 'e' => $e]);
+        $this->presence->broadcast(Presence::room($p, $p->zone), 'emote', ['id' => $c->id, 'e' => $e]);
     }
 
     // --- invitations, duels, échanges -----------------------------------------------------------------------------------

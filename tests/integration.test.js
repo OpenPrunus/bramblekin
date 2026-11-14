@@ -60,12 +60,15 @@ describe('monde partagé', () => {
     await a.join('Carla');
     const b = await bot();
     await b.join('Dimitri');
-    assert.ok(b.zone.peers.some((p) => p.name === 'Carla'));
+    assert.deepEqual(b.zone.peers, [], 'chacun sa chambre');
+    await leaveHome(a);
+    await leaveHome(b);
+    assert.ok(b.last('zone').peers.some((p) => p.name === 'Carla'));
     const moved = b.next('peer');
     await step(a, 'd');
     const seen = await moved;
     assert.equal(seen.name, 'Carla');
-    assert.equal(seen.y, a.zone.me.y + 1);
+    assert.equal(seen.y, a.last('zone').me.y + 1);
     const emote = b.next('emote');
     a.send({ t: 'emote', e: 1 });
     assert.equal((await emote).e, 1);
@@ -99,6 +102,8 @@ describe('monde partagé', () => {
     await a.join('Fanny');
     const b = await bot();
     await b.join('Gaston');
+    await leaveHome(a);
+    await leaveHome(b);
     const idB = b.last('welcome').id;
     const idA = a.last('welcome').id;
     a.send({ t: 'invite', id: idB, kind: 'duel' });
@@ -146,6 +151,8 @@ describe('monde partagé', () => {
     await a.join('Hector', 1);
     const b = await bot();
     await b.join('Iris', 4);
+    await leaveHome(a);
+    await leaveHome(b);
     a.send({ t: 'invite', id: b.last('welcome').id, kind: 'trade' });
     await b.next('invite');
     b.send({ t: 'accept', id: a.last('welcome').id });

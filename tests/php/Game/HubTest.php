@@ -240,6 +240,74 @@ final class HubTest extends TestCase
         self::assertSame('r1', $p->zone);
     }
 
+    public function testPrivateRoomsGiftsAndItems(): void
+    {
+        $hub = $this->hub();
+        [$a, $ta] = $this->join($hub, 'Alice', 'alice', false);
+        [$b, $tb] = $this->join($hub, 'Bob', 'bob', false);
+        self::assertSame([], $tb->last('zone')['zone'] === null ? [] : $tb->last('zone')['peers'], 'chacun sa chambre');
+        $pa = $a->profile;
+        self::assertNotNull($pa);
+        self::assertSame(1, $pa->count(\Bramble\Content\Item::Map), 'une carte dès le début');
+        // un don, une seule fois
+        $hub->presence->leave($a, $pa->zone);
+        [$pa->zone, $pa->x, $pa->y, $pa->dir] = ['hb3', 4, 3, 'l'];
+        $hub->presence->enter($a);
+        self::send($hub, $a, ['t' => 'interact']);
+        self::assertSame('gift_key', $ta->last('say')['text']);
+        self::assertTrue($pa->has(\Bramble\Content\Item::Bike));
+        self::send($hub, $a, ['t' => 'interact']);
+        self::assertSame('giftAfter', $ta->last('say')['text']);
+        // pas de vélo à l'intérieur ; dehors on monte dessus
+        self::send($hub, $a, ['t' => 'use', 'item' => 'bike']);
+        self::assertSame('no_bike_here', $ta->last('error')['code']);
+        $hub->presence->leave($a, $pa->zone);
+        [$pa->zone, $pa->x, $pa->y] = ['t3', 15, 13];
+        $hub->presence->enter($a);
+        self::send($hub, $a, ['t' => 'use', 'item' => 'bike']);
+        self::assertTrue($pa->riding);
+        self::assertTrue($ta->last('used')['log'][0]['on']);
+        // capsule technique, bonbon rare, pierre d'éveil
+        $pa->store($pa->newKin(4, 10));                       // Braisillon (feu)
+        $uid = $pa->team[0]->uid;
+        $pa->give(\Bramble\Content\Item::Ct02);
+        self::send($hub, $a, ['t' => 'use', 'item' => 'ct02', 'uid' => $uid]);
+        self::assertSame('incompatible', $ta->last('error')['code']);
+        $pa->give(\Bramble\Content\Item::Ct01);
+        self::send($hub, $a, ['t' => 'use', 'item' => 'ct01', 'uid' => $uid]);
+        self::assertContains('flame3', array_merge(array_map(static fn (array $m): string => $m[0], $pa->team[0]->moves), $pa->team[0]->pending));
+        self::assertSame(0, $pa->count(\Bramble\Content\Item::Ct01), 'usage unique');
+        $pa->give(\Bramble\Content\Item::RareCandy);
+        self::send($hub, $a, ['t' => 'use', 'item' => 'candy', 'uid' => $uid]);
+        self::assertSame(11, $pa->team[0]->level);
+        $pa->give(\Bramble\Content\Item::AwakeStone);
+        self::send($hub, $a, ['t' => 'use', 'item' => 'stone', 'uid' => $uid]);
+        self::assertSame(5, $pa->team[0]->species);
+        self::assertSame('evolve', $ta->last('used')['log'][0]['k']);
+        // le buisson ne s'ouvre qu'avec la capsule spéciale Coupe
+        $route = \Bramble\World\World::zone('r2');
+        self::assertNotNull($route);
+        $hidden = $route->npc('r2.hidden');
+        self::assertNotNull($hidden);
+        $bushX = null;
+        foreach ([-1, 1] as $d) {
+            if ($route->tile($hidden->x + 2 * $d, $hidden->y) === \Bramble\World\Tile::BUSH) {
+                $bushX = $hidden->x + 2 * $d;
+            }
+        }
+        self::assertNotNull($bushX);
+        $side = $bushX + ($bushX - $hidden->x) / 2;
+        $hub->presence->leave($a, $pa->zone);
+        [$pa->zone, $pa->x, $pa->y] = ['r2', (int) $side, $hidden->y];
+        $hub->presence->enter($a);
+        $dir = $bushX < $side ? 'l' : 'r';
+        $this->walk($hub, $a, $dir);
+        self::assertSame((int) $side, $pa->x, 'buisson infranchissable');
+        $pa->give(\Bramble\Content\Item::CutCapsule);
+        $this->walk($hub, $a, $dir);
+        self::assertSame($bushX, $pa->x, 'on taille le buisson');
+    }
+
     public function testShopAndItems(): void
     {
         $hub = $this->hub();

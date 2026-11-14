@@ -23,7 +23,9 @@ final class Profile
     /**
      * @var array<string, int>
      */
-    public array $items = ['orb' => 5, 'potion' => 3];
+    public array $items = ['orb' => 5, 'potion' => 3, 'map' => 1];
+    /** À vélo (dehors seulement). */
+    public bool $riding = false;
     /**
      * @var list<Kin>
      */
@@ -109,7 +111,7 @@ final class Profile
 
     public function give(Item $item, int $n = 1): void
     {
-        $this->items[$item->value] = min(999, $this->count($item) + $n);
+        $this->items[$item->value] = $item->isKey() ? 1 : min(999, $this->count($item) + $n);
     }
 
     public function teamIndex(int $uid): ?int
@@ -133,6 +135,11 @@ final class Profile
         foreach ($this->team as $kin) {
             $kin->restore();
         }
+    }
+
+    public function has(Item $item): bool
+    {
+        return $this->count($item) > 0;
     }
 
     public function badgeCount(): int
@@ -222,7 +229,7 @@ final class Profile
             'name' => $this->name, 'money' => $this->money, 'items' => (object) $this->items, 'badges' => $this->badges,
             'team' => array_map(static fn (Kin $k): array => $k->toClient(), $this->team),
             'boxCount' => count($this->box), 'dex' => (object) $this->dex, 'look' => $this->look, 'champion' => $this->champion,
-            'heal' => $this->healTown,
+            'heal' => $this->healTown, 'riding' => $this->riding,
         ];
     }
 }

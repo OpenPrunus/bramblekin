@@ -24,6 +24,8 @@ final class Tile
     final public const string BRIDGE = 'b';
     final public const string SAND = 's';
     final public const string RUG = 'm';
+    /** Petit buisson : franchissable avec la capsule spéciale Coupe. */
+    final public const string BUSH = 'x';
     final public const string COUNTER = 'C';
     final public const string SHELF = 'S';
     final public const string PLANT = 'p';

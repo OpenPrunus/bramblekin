@@ -217,8 +217,9 @@ final class Fights
             $npc = $fight->npc;
             if ($npc !== null) {
                 $p->done[$npc->id] = true;
-                $p->money += $npc->reward;
-                $end[] = ['k' => 'money', 'n' => $npc->reward];
+                $reward = $p->has(Item::Charm) ? intdiv($npc->reward * 3, 2) : $npc->reward;
+                $p->money += $reward;
+                $end[] = ['k' => 'money', 'n' => $reward];
                 if ($npc->kind === 'leader' && !in_array($npc->badge, $p->badges, true)) {
                     $p->badges[] = $npc->badge;
                     sort($p->badges);

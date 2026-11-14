@@ -167,6 +167,7 @@ class App {
       case 'npcGone': this.world.removeNpc(m.id); break;
       case 'shop': this.panels.open('shop', m.items); break;
       case 'box': if (this.panels.current === 'box') { this.panels.lastData = m.box; this.panels.refresh(); } else this.panels.open('box', m.box); break;
+      case 'used': this.used(m); break;
       case 'bought': sfx.select(); this.toast(t('bought', { item: pick(this.content.items.find((i) => i.id === m.item)?.name), n: m.n })); break;
       case 'battle':
         this.path = []; this.held = [];
@@ -218,6 +219,10 @@ class App {
     if (!p) return;
     this.profile = p;
     this.world.look = p.look;
+    this.world.riding = !!p.riding;
+    this.world.abilities = { cut: (p.items.cs_cut ?? 0) > 0, surf: (p.items.cs_surf ?? 0) > 0 };
+    $('btn-bike').hidden = !((p.items.bike ?? 0) > 0);
+    $('btn-bike').classList.toggle('on', !!p.riding);
     this.updateHud();
     this.panels.refresh();
   }
@@ -235,6 +240,21 @@ class App {
     this.titleMessage('');
     this.updateHud();
     this.banner(pick(m.zone.name));
+  }
+
+  /** Résultat d'un objet utilisé hors combat : vélo, attaque apprise, niveau, évolution. */
+  used(m) {
+    const name = (uid) => this.content.species[(this.profile.team.find((k) => k.uid === uid)?.sp ?? 1) - 1].name;
+    const lines = [];
+    for (const e of m.log) {
+      if (e.k === 'bike') { this.toast(t(e.on ? 'bikeOn' : 'bikeOff')); sfx.select(); }
+      if (e.k === 'learn') lines.push(t('learned', { n: name(e.uid), m: pick(this.content.moves[e.move].name) }));
+      if (e.k === 'wants') { lines.push(t('wants', { n: name(e.uid), m: pick(this.content.moves[e.move].name) })); this.learning = true; }
+      if (e.k === 'level') lines.push(t('levelUp', { n: name(e.uid), l: e.level }));
+      if (e.k === 'evolve') lines.push(t('evolved', { a: this.content.species[e.from - 1].name, b: this.content.species[e.to - 1].name }));
+    }
+    if (m.log.some((e) => e.k === 'evolve' || e.k === 'level')) sfx.level();
+    if (lines.length) { this.panels.close(); this.dialog(lines); }
   }
 
   afterBattle() {
@@ -283,6 +303,7 @@ class App {
   say(m) {
     let key = m.text;
     const params = { ...m };
+    if (m.gift) sfx.badge();
     if (m.after) key = key.startsWith('leader') ? 'leaderAfter' : key === 'champion' ? 'championAfter' : 'trainerAfter';
     if (m.item) params.item = pick(this.content.items.find((i) => i.id === m.item)?.name);
     if (key === 'labThanks') sfx.caught();
@@ -356,6 +377,7 @@ class App {
     $('btn-b').addEventListener('click', () => this.pressB());
     $('btn-menu').addEventListener('click', () => (this.panels.isOpen ? this.panels.close() : this.panels.open('team')));
     $('btn-emote').addEventListener('click', () => this.emotePicker());
+    $('btn-bike').addEventListener('click', () => { if (!this.locked) this.send({ t: 'use', item: 'bike' }); });
     $('dialog').addEventListener('click', () => this.advanceDialog());
     // toucher la carte : marcher jusque-là, parler, ou ouvrir le menu d'un joueur
     $('world').addEventListener('pointerdown', (e) => {
