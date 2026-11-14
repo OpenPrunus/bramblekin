@@ -3,7 +3,7 @@ import test, { describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Bot, startGameServer, token, waitFor } from './helpers.js';
+import { Bot, leaveHome, startGameServer, token, waitFor, walkTo } from './helpers.js';
 
 let server;
 let wild;
@@ -20,8 +20,6 @@ before(async () => {
 });
 after(() => { for (const b of bots) b.close(); server?.stop(); wild?.stop(); });
 
-const DIRS = { u: [0, -1], d: [0, 1], l: [-1, 0], r: [1, 0] };
-
 /** Marche d'un pas (le serveur limite la cadence : on attend un peu entre deux pas). */
 async function step(b, d) {
   b.send({ t: 'step', d, n: Date.now() });
@@ -36,11 +34,15 @@ describe('monde partagé', () => {
     assert.equal(w.content.species.length, 150);
     assert.equal(w.content.towns.length, 10);
     a.send({ t: 'starter', sp: 4 });
-    const z = await a.next('zone');
-    assert.equal(z.zone.id, 't1');
-    assert.equal(z.zone.rows.length, 24);
-    assert.ok(z.zone.npcs.some((n) => n.kind === 'nurse'));
+    const z = a.last('zone') ?? await a.next('zone');
+    assert.equal(z.zone.id, 'ha1', 'on commence dans sa chambre');
+    await a.next('profile', 3000, true);
     assert.equal(a.last('profile').profile.team[0].sp, 4);
+    await leaveHome(a);
+    const town = a.last('zone');
+    assert.equal(town.zone.id, 't1');
+    assert.equal(town.zone.rows.length, 24);
+    assert.deepEqual([town.me.x, town.me.y], [7, 18]);
   });
 
   test('un pseudo pris ou un jeton invalide sont refusés', async () => {
@@ -60,10 +62,10 @@ describe('monde partagé', () => {
     await b.join('Dimitri');
     assert.ok(b.zone.peers.some((p) => p.name === 'Carla'));
     const moved = b.next('peer');
-    await step(a, 'u');
+    await step(a, 'd');
     const seen = await moved;
     assert.equal(seen.name, 'Carla');
-    assert.equal(seen.y, a.zone.me.y - 1);
+    assert.equal(seen.y, a.zone.me.y + 1);
     const emote = b.next('emote');
     a.send({ t: 'emote', e: 1 });
     assert.equal((await emote).e, 1);
@@ -160,30 +162,14 @@ describe('rencontres sauvages', () => {
   test('marcher dans les hautes herbes déclenche un combat ; on peut le gagner ou attraper la créature', async () => {
     const a = await bot(wild);
     await a.join('Jules', 7);
-    // vers le nord jusqu'à la route 1
-    for (let i = 0; i < 16 && a.last('zone').zone.id !== 'r1'; i++) await step(a, 'u');
-    const r1 = a.last('zone');
-    assert.equal(r1.zone.id, 'r1');
-    // le chemin le plus court vers une herbe haute (parcours en largeur sur la carte reçue)
+    await leaveHome(a);
+    await walkTo(a, 14, 0);
+    const r1 = await waitFor(() => (a.last('zone').zone.id === 'r1' ? a.last('zone') : null), 3000, 'route 1');
+    // jusqu'à l'herbe haute la plus proche
     const rows = r1.zone.rows;
-    const blocked = new Set(r1.zone.npcs.map((n) => `${n.x},${n.y}`));
-    const ok = (x, y) => '.,"fD_bs'.includes(rows[y]?.[x] ?? 'T') && !blocked.has(`${x},${y}`);
-    const start = [r1.me.x, r1.me.y];
-    const prev = new Map([[start.join(), null]]);
-    const queue = [start];
     let goal = null;
-    while (queue.length) {
-      const [x, y] = queue.shift();
-      if (rows[y][x] === '"') { goal = [x, y]; break; }
-      for (const [d, [dx, dy]] of Object.entries(DIRS)) {
-        const k = `${x + dx},${y + dy}`;
-        if (!prev.has(k) && ok(x + dx, y + dy) && y + dy > 0) { prev.set(k, [`${x},${y}`, d]); queue.push([x + dx, y + dy]); }
-      }
-    }
-    assert.ok(goal, 'une herbe haute accessible');
-    const dirs = [];
-    for (let k = goal.join(); prev.get(k);) { const [from, d] = prev.get(k); dirs.unshift(d); k = from; }
-    for (const d of dirs) { if (a.last('battle')) break; await step(a, d); }
+    rows.forEach((row, y) => { for (let x = 0; x < row.length; x++) if (row[x] === '"' && y > 1 && (!goal || Math.abs(x - r1.me.x) + Math.abs(y - r1.me.y) < goal[2])) goal = [x, y, Math.abs(x - r1.me.x) + Math.abs(y - r1.me.y)]; });
+    await walkTo(a, goal[0], goal[1], () => !!a.last('battle'));
     const battle = await a.next('battle', 3000, true);
     assert.equal(battle.intro.kind, 'wild');
     for (let i = 0; i < 60 && !a.last('battleEnd'); i++) {

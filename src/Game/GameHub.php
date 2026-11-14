@@ -119,11 +119,6 @@ final class GameHub implements Hub
 
             return;
         }
-        if (!$p->hasStarter()) {
-            $c->error('no_starter');
-
-            return;
-        }
         match ($type) {
             'step' => $this->step($c, $p, $msg, $now),
             'turn' => $this->face($c, $p, $msg),
@@ -204,9 +199,7 @@ final class GameHub implements Hub
             'starter' => !$profile->hasStarter(), 'rating' => $this->ratings->ratingOf($id),
         ]);
         $this->logger->info("hello {$c->id} {$name}");
-        if ($profile->hasStarter()) {
-            $this->presence->enter($c);
-        }
+        $this->presence->enter($c);
     }
 
     /**
@@ -235,7 +228,12 @@ final class GameHub implements Hub
         $p->store($p->newKin($species, 5));
         $this->store->save($p);
         $c->send('profile', ['profile' => $p->toClient()]);
-        $this->presence->enter($c);
+        foreach (Presence::zoneOf($p)->npcs as $npc) {
+            if ($npc->kind === 'starter') {
+                $c->send('npcGone', ['id' => $npc->id]);
+            }
+        }
+        $c->send('say', ['text' => 'labThanks', 'sp' => $species]);
     }
 
     // --- déplacements ---------------------------------------------------------------------------------------------------
@@ -269,6 +267,16 @@ final class GameHub implements Hub
         $p->y += $dy;
         $c->dirty = true;
         $warp = $zone->warpAt($p->x, $p->y);
+        if ($warp !== null && !$p->hasStarter() && str_starts_with($warp->zone, 'r')) {
+            // sans compagnon, le professeur ne laisse pas partir dans les hautes herbes
+            $p->x -= $dx;
+            $p->y -= $dy;
+            $p->dir = 'd';
+            $this->reject($c, $p, $seq);
+            $c->send('say', ['text' => 'profStop']);
+
+            return;
+        }
         if ($warp !== null) {
             $this->presence->leave($c, $zone->id);
             [$p->zone, $p->x, $p->y] = [$warp->zone, $warp->toX, $warp->toY];
@@ -326,8 +334,11 @@ final class GameHub implements Hub
     {
         [$dx, $dy] = self::DIRS[$p->dir];
         $visible = Presence::visibleFor($p);
-        foreach (Presence::zoneOf($p)->npcs as $npc) {
-            if ($npc->x === $p->x + $dx && $npc->y === $p->y + $dy && $visible($npc)) {
+        $zone = Presence::zoneOf($p);
+        // on parle par-dessus un comptoir
+        $reach = $zone->tile($p->x + $dx, $p->y + $dy) === Tile::COUNTER ? 2 : 1;
+        foreach ($zone->npcs as $npc) {
+            if ($npc->x === $p->x + $dx * $reach && $npc->y === $p->y + $dy * $reach && $visible($npc)) {
                 return $npc;
             }
         }
@@ -376,11 +387,21 @@ final class GameHub implements Hub
                     $c->send('profile', ['profile' => $p->toClient()]);
                 }
                 break;
+            case 'starter':
+                if (!$p->hasStarter() && $npc->team !== []) {
+                    $c->send('starterPick', ['sp' => $npc->team[0][0]]);
+                }
+                break;
             case 'prof':
+                if (!$p->hasStarter()) {
+                    $c->send('say', ['text' => 'labChoose']);
+                    break;
+                }
                 $c->send('say', ['text' => 'prof', 'seen' => count($p->dex), 'caught' => count(array_filter($p->dex, static fn (int $s): bool => $s === 2))]);
                 break;
             default:
-                $c->send('say', ['text' => $npc->text, 'need' => $npc->need, 'npc' => $npc->id]);
+                $text = $npc->text === 'home' && !$p->hasStarter() ? 'homeStart' : $npc->text;
+                $c->send('say', ['text' => $text, 'need' => $npc->need, 'npc' => $npc->id]);
         }
     }
 

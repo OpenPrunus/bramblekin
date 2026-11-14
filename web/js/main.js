@@ -130,7 +130,6 @@ class App {
     $('title').hidden = false;
     $('hud').hidden = true;
     $('pad').hidden = true;
-    $('starter').hidden = true;
     $('battle').hidden = true;
     this.panels.close();
     this.titleMessage(message);
@@ -144,12 +143,19 @@ class App {
         this.setProfile(m.profile);
         this.battle ??= new BattleView($('battle'), { content: this.content, send: (x) => this.send(x), onClose: () => this.afterBattle(), fast: window.BRAMBLE_FAST === true });
         this.battle.bagItems = () => this.profile.items;
-        if (m.starter) {
-          $('title').hidden = true;
-          this.panels.starter((sp) => { this.send({ t: 'starter', sp }); $('starter').hidden = true; });
+        this.battle.themeOf = () => this.zoneInfo?.theme ?? 1;
+        this.battle.placeOf = () => this.zoneInfo?.kind;
+        if (m.starter) this.pendingIntro = m.profile.name;
+        break;
+      case 'zone':
+        this.enterZone(m);
+        if (this.pendingIntro) {
+          const name = this.pendingIntro;
+          this.pendingIntro = null;
+          this.panels.intro(name, () => this.focusGame());
         }
         break;
-      case 'zone': this.enterZone(m); break;
+      case 'starterPick': this.panels.starterPick(m.sp, (sp) => this.send({ t: 'starter', sp })); break;
       case 'profile': this.setProfile(m.profile); if (this.learning) { this.learning = false; this.learnNext(); } break;
       case 'pos':
         if (m.zone === this.world.zone?.id) { this.world.snap(m.x, m.y, m.d); this.path = []; this.awaitingZone = false; }
@@ -224,7 +230,6 @@ class App {
     this.world.setZone(m.zone, m.me, m.peers);
     this.world.resize();
     $('title').hidden = true;
-    $('starter').hidden = true;
     $('hud').hidden = false;
     $('pad').hidden = !this.touch;
     this.titleMessage('');
@@ -280,6 +285,7 @@ class App {
     const params = { ...m };
     if (m.after) key = key.startsWith('leader') ? 'leaderAfter' : key === 'champion' ? 'championAfter' : 'trainerAfter';
     if (m.item) params.item = pick(this.content.items.find((i) => i.id === m.item)?.name);
+    if (key === 'labThanks') sfx.caught();
     if (key === 'nurse') sfx.heal();
     const prefix = m.name ? `${t(`cls_${m.cls}`)} ${m.name} : ` : '';
     this.dialog([prefix + t(key, params)]);
@@ -307,7 +313,7 @@ class App {
   // --- commandes ------------------------------------------------------------------------------------------------------
 
   get locked() {
-    return !this.inGame || this.awaitingZone || this.dialogOpen || this.panels.isOpen || !!this.battle?.open || !$('starter').hidden;
+    return !this.inGame || this.awaitingZone || this.dialogOpen || this.panels.isOpen || !!this.battle?.open;
   }
 
   bindInput() {

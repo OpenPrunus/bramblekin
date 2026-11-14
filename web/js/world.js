@@ -1,6 +1,6 @@
 // Bramblekin — la carte vue de dessus : rendu, déplacements prédits du joueur, autres joueurs, personnages, émotions.
-import { renderZone, WALKABLE } from './tiles.js';
-import { characterCanvas, palette } from './sprites.js';
+import { renderZone, WALKABLE, T, theme, drawGrass, drawWater, hash } from './tiles.js';
+import { characterCanvas, palette, CHAR_W, CHAR_H } from './sprites.js';
 
 export const STEP_MS = 190;
 export const DIRS = { u: [0, -1], d: [0, 1], l: [-1, 0], r: [1, 0] };
@@ -31,12 +31,17 @@ export class World {
       this.canvas.height = h;
     }
     this.dpr = dpr;
-    this.scale = Math.max(2, Math.floor(Math.min(w, h) / (12 * 16)));
+    // taille d'une case à l'écran (pixels réels) : une douzaine de cases sur le petit côté
+    this.tilePx = Math.max(28 * dpr, Math.min(w, h) / 11);
   }
 
   setZone(zone, me, peers) {
     this.zone = zone;
-    this.frames = renderZone(zone);
+    this.map = renderZone(zone);
+    this.th = theme(zone.theme);
+    this.special = [];
+    zone.rows.forEach((row, y) => { for (let x = 0; x < row.length; x++) if (row[x] === '"' || row[x] === '~') this.special.push([x, y, row[x]]); });
+    this.motes = Array.from({ length: 26 }, (_, i) => ({ x: hash(i, 3), y: hash(7, i), s: 0.5 + hash(i, i) }));
     this.warps = new Set(zone.warps.map(([x, y]) => `${x},${y}`));
     this.me = { x: me.x, y: me.y, d: me.d, fromX: me.x, fromY: me.y, t: 1, moving: false, walk: 0 };
     this.peers = new Map();
@@ -114,7 +119,10 @@ export class World {
     let found = null;
     while (queue.length && prev.size < 4000) {
       const [x, y] = queue.shift();
-      if (occupied ? Math.abs(x - tx) + Math.abs(y - ty) === 1 : goal(x, y)) { found = [x, y]; break; }
+      const near = Math.abs(x - tx) + Math.abs(y - ty) === 1;
+      // on parle aussi par-dessus un comptoir (infirmière, vendeur)
+      const across = (x === tx || y === ty) && Math.abs(x - tx) + Math.abs(y - ty) === 2 && this.tile((x + tx) / 2, (y + ty) / 2) === 'C';
+      if (occupied ? near || across : goal(x, y)) { found = [x, y]; break; }
       for (const [d, [dx, dy]] of Object.entries(DIRS)) {
         const nx = x + dx; const ny = y + dy;
         const key = `${nx},${ny}`;
@@ -133,7 +141,7 @@ export class World {
       key = from;
     }
     if (occupied) {
-      const fx = tx - found[0]; const fy = ty - found[1];
+      const fx = Math.sign(tx - found[0]); const fy = Math.sign(ty - found[1]);
       dirs.push(Object.keys(DIRS).find((d) => DIRS[d][0] === fx && DIRS[d][1] === fy) + '!');
     }
     return dirs;
@@ -154,7 +162,7 @@ export class World {
   }
 
   camera() {
-    const S = this.scale * 16;
+    const S = this.tilePx;
     const m = this.me;
     const vw = this.canvas.width / S;
     const vh = this.canvas.height / S;
@@ -174,14 +182,21 @@ export class World {
 
   draw() {
     const ctx = this.ctx;
-    ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = '#16141c';
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.fillStyle = this.zone?.kind === 'inside' || this.zone?.kind === 'gym' ? '#2a2230' : '#1f3a2a';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     if (!this.zone || !this.me) return;
     const { ox, oy, S } = this.camera();
-    const k = this.scale;
-    const frame = this.frames[Math.floor(this.time / 600) % 2];
-    ctx.drawImage(frame, ox, oy, frame.width * k, frame.height * k);
+    const k = S / T;
+    ctx.drawImage(this.map, ox, oy, this.map.width * k, this.map.height * k);
+    // eau et herbes hautes animées (seulement à l'écran)
+    const vis = (x, y) => ox + (x + 1) * S > 0 && ox + x * S < this.canvas.width && oy + (y + 1) * S > 0 && oy + (y - 1) * S < this.canvas.height;
+    for (const [x, y, ch] of this.special) {
+      if (!vis(x, y)) continue;
+      if (ch === '~') drawWater(ctx, ox + x * S, oy + y * S, k, this.time, x, y);
+      else drawGrass(ctx, ox + x * S, oy + y * S, k, this.th, this.time, x, y);
+    }
     const things = [];
     for (const n of this.zone.npcs) things.push({ kind: 'npc', n, x: n.x, y: n.y });
     for (const p of this.peers.values()) {
@@ -191,90 +206,122 @@ export class World {
     things.push({ kind: 'me', x: m.fromX + (m.x - m.fromX) * m.t, y: m.fromY + (m.y - m.fromY) * m.t });
     things.sort((a, b) => a.y - b.y);
     for (const th of things) {
-      const sx = ox + Math.round(th.x * 16 * k);
-      const sy = oy + Math.round(th.y * 16 * k);
-      if (th.kind === 'npc') this.drawNpc(th.n, sx, sy, k);
-      else {
-        const who = th.kind === 'me' ? m : th.p;
-        const moving = th.kind === 'me' ? m.moving : who.t < 1;
-        const frameNo = moving && (th.kind === 'me' ? m.t : who.t) > 0.25 && (th.kind === 'me' ? m.t : who.t) < 0.85 ? 1 + who.walk : 0;
-        const look = th.kind === 'me' ? this.look : who.look;
-        ctx.drawImage(characterCanvas(palette('player', look), who.d, frameNo), sx, sy - 3 * k, 16 * k, 16 * k);
-        // les hautes herbes cachent les pieds
-        const tx = Math.round(th.x); const ty = Math.round(th.y);
-        if (this.tile(tx, ty) === '"' && !moving) {
-          ctx.drawImage(frame, tx * 16, ty * 16 + 9, 16, 7, ox + tx * 16 * k, oy + (ty * 16 + 9) * k, 16 * k, 7 * k);
-        }
-      }
+      const sx = ox + th.x * S;
+      const sy = oy + th.y * S;
+      if (th.kind === 'npc') { this.drawNpc(th.n, sx, sy, k); continue; }
+      const who = th.kind === 'me' ? m : th.p;
+      const t = th.kind === 'me' ? m.t : who.t;
+      const moving = th.kind === 'me' ? m.moving : who.t < 1;
+      const frameNo = moving && t > 0.2 && t < 0.8 ? 1 + who.walk : 0;
+      const look = th.kind === 'me' ? this.look : who.look;
+      this.shadow(sx, sy, k);
+      ctx.drawImage(characterCanvas(palette('player', look), who.d, frameNo), sx, sy - (CHAR_H - T) * k, CHAR_W * k, CHAR_H * k);
+      // les hautes herbes cachent les jambes
+      const tx = Math.round(th.x); const ty = Math.round(th.y);
+      if (this.tile(tx, ty) === '"') drawGrass(ctx, ox + tx * S, oy + ty * S, k, this.th, this.time, tx, ty, true);
     }
+    this.ambience(ctx);
     // noms et bulles par-dessus
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-    const fs = Math.max(10, Math.round(4 * k));
-    ctx.font = `600 ${fs}px system-ui, sans-serif`;
+    ctx.textBaseline = 'middle';
+    const fs = Math.max(11 * this.dpr, Math.round(S * 0.24));
+    ctx.font = `700 ${fs}px system-ui, sans-serif`;
     for (const th of things) {
       if (th.kind === 'npc') continue;
-      const sx = ox + Math.round(th.x * 16 * k) + 8 * k;
-      const sy = oy + Math.round(th.y * 16 * k) - 4 * k;
+      const sx = ox + th.x * S + S / 2;
+      const sy = oy + th.y * S - S * 0.5;
       if (th.kind === 'peer') {
         const label = th.p.busy ? `⚔ ${th.p.name}` : th.p.name;
-        const w = ctx.measureText(label).width + fs * 0.6;
-        ctx.fillStyle = 'rgba(20,18,28,0.72)';
-        ctx.fillRect(sx - w / 2, sy - fs * 1.15, w, fs * 1.2);
-        ctx.fillStyle = '#ffffff';
+        const w = ctx.measureText(label).width + fs;
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.beginPath(); ctx.roundRect(sx - w / 2, sy - fs * 0.75, w, fs * 1.5, fs * 0.75); ctx.fill();
+        ctx.fillStyle = '#2b2a3a';
         ctx.fillText(label, sx, sy);
       }
       const b = this.bubbles.get(th.kind === 'me' ? this.myId : th.p.id);
       if (b) {
-        const by = sy - (th.kind === 'peer' ? fs * 1.3 : 0);
+        const by = sy - (th.kind === 'peer' ? fs * 2.2 : fs * 0.6);
+        const r = fs * 1.15;
         ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.roundRect(sx - fs * 1.1, by - fs * 2.1, fs * 2.2, fs * 1.9, fs * 0.4);
-        ctx.fill();
-        ctx.strokeStyle = '#1d1a26';
-        ctx.lineWidth = Math.max(1, k / 2);
-        ctx.stroke();
-        ctx.font = `${Math.round(fs * 1.3)}px system-ui, sans-serif`;
+        ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = fs * 0.5; ctx.shadowOffsetY = fs * 0.15;
+        ctx.beginPath(); ctx.arc(sx, by, r, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(sx - r * 0.3, by + r * 0.8); ctx.lineTo(sx, by + r * 1.4); ctx.lineTo(sx + r * 0.3, by + r * 0.8); ctx.fill();
+        ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+        ctx.font = `${Math.round(fs * 1.25)}px system-ui, sans-serif`;
         ctx.fillStyle = '#000';
-        ctx.fillText(EMOTES[b.e] ?? '?', sx, by - fs * 0.35);
-        ctx.font = `600 ${fs}px system-ui, sans-serif`;
+        ctx.fillText(EMOTES[b.e] ?? '?', sx, by + fs * 0.08);
+        ctx.font = `700 ${fs}px system-ui, sans-serif`;
       }
+    }
+  }
+
+  shadow(sx, sy, k) {
+    const ctx = this.ctx;
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.beginPath(); ctx.ellipse(sx + 24 * k, sy + 44 * k, 15 * k, 5.5 * k, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  /** Lumière d'ambiance : vignette douce, teinte de la carte, poussières ou flocons qui flottent. */
+  ambience(ctx) {
+    const W = this.canvas.width; const H = this.canvas.height;
+    const z = this.zone;
+    const inside = z.kind === 'inside' || z.kind === 'gym';
+    const v = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+    v.addColorStop(0, 'rgba(0,0,0,0)');
+    v.addColorStop(1, inside ? 'rgba(40,20,10,0.35)' : 'rgba(10,30,40,0.28)');
+    ctx.fillStyle = v;
+    ctx.fillRect(0, 0, W, H);
+    const tint = inside ? 'rgba(255,190,120,0.07)' : { 7: 'rgba(200,230,255,0.10)', 8: 'rgba(60,90,40,0.10)', 9: 'rgba(70,50,120,0.16)', 10: 'rgba(220,235,255,0.08)' }[z.theme];
+    if (tint) { ctx.fillStyle = tint; ctx.fillRect(0, 0, W, H); }
+    const snow = z.theme === 7 || z.theme === 10;
+    ctx.fillStyle = snow ? 'rgba(255,255,255,0.85)' : inside ? 'rgba(255,230,180,0.35)' : 'rgba(255,255,220,0.45)';
+    for (const p of this.motes) {
+      const t = this.time / (snow ? 7000 : 14000);
+      const x = ((p.x + t * (snow ? 0.15 : 0.4) * p.s + Math.sin(t * 6 + p.y * 9) * 0.02) % 1) * W;
+      const y = ((p.y + t * (snow ? 1 : -0.25) * p.s) % 1 + 1) % 1 * H;
+      ctx.beginPath(); ctx.arc(x, y, (snow ? 2.2 : 1.4) * p.s * this.dpr, 0, Math.PI * 2); ctx.fill();
     }
   }
 
   drawNpc(n, sx, sy, k) {
     const ctx = this.ctx;
     if (n.kind === 'item') {
-      const cx = sx + 8 * k; const cy = sy + 9 * k;
-      ctx.fillStyle = '#1d1a26';
-      ctx.beginPath(); ctx.arc(cx, cy, 5 * k, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#e84a4a';
-      ctx.beginPath(); ctx.arc(cx, cy, 4 * k, Math.PI, 0); ctx.fill();
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath(); ctx.arc(cx, cy, 4 * k, 0, Math.PI); ctx.fill();
-      ctx.fillStyle = '#1d1a26'; ctx.fillRect(cx - 4 * k, cy - k / 2, 8 * k, k);
-      ctx.fillStyle = '#ffffff'; ctx.fillRect(cx - k, cy - k, 2 * k, 2 * k);
+      const cx = sx + 24 * k; const cy = sy + 28 * k; const r = 9 * k;
+      ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.beginPath(); ctx.ellipse(cx + 2 * k, cy + r, r, r * 0.35, 0, 0, Math.PI * 2); ctx.fill();
+      const g = ctx.createRadialGradient(cx - r * 0.4, cy - r * 0.5, r * 0.1, cx, cy, r);
+      g.addColorStop(0, '#ff9a9a'); g.addColorStop(0.5, '#e84a4a'); g.addColorStop(1, '#a52a2a');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r, Math.PI, 0); ctx.fill();
+      const w = ctx.createRadialGradient(cx - r * 0.3, cy, r * 0.1, cx, cy, r);
+      w.addColorStop(0, '#ffffff'); w.addColorStop(1, '#cfd3da');
+      ctx.fillStyle = w; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI); ctx.fill();
+      ctx.fillStyle = '#2b2a3a'; ctx.fillRect(cx - r, cy - k, 2 * r, 2 * k);
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(cx, cy, 2.6 * k, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#2b2a3a'; ctx.lineWidth = k; ctx.stroke();
+      const glow = 0.5 + Math.sin(this.time / 300) * 0.5;
+      ctx.fillStyle = `rgba(255,255,255,${0.5 * glow})`; ctx.beginPath(); ctx.arc(cx - r * 0.35, cy - r * 0.45, 2 * k, 0, Math.PI * 2); ctx.fill();
       return;
     }
     if (n.kind === 'sign') {
-      ctx.fillStyle = '#6b4a2f'; ctx.fillRect(sx + 7 * k, sy + 8 * k, 2 * k, 8 * k);
-      ctx.fillStyle = '#1d1a26'; ctx.fillRect(sx + 1 * k, sy + 2 * k, 14 * k, 8 * k);
-      ctx.fillStyle = '#c99a5b'; ctx.fillRect(sx + 2 * k, sy + 3 * k, 12 * k, 6 * k);
-      ctx.fillStyle = '#8a6243'; ctx.fillRect(sx + 4 * k, sy + 5 * k, 8 * k, k); ctx.fillRect(sx + 4 * k, sy + 7 * k, 6 * k, k);
+      this.shadow(sx, sy, k);
+      ctx.fillStyle = '#6b4a2f'; ctx.fillRect(sx + 21 * k, sy + 22 * k, 6 * k, 22 * k);
+      const g = ctx.createLinearGradient(0, sy + 6 * k, 0, sy + 28 * k);
+      g.addColorStop(0, '#d9ab6c'); g.addColorStop(1, '#a8743f');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(sx + 6 * k, sy + 6 * k, 36 * k, 22 * k, 4 * k); ctx.fill();
+      ctx.fillStyle = 'rgba(80,45,20,0.45)'; ctx.fillRect(sx + 12 * k, sy + 13 * k, 24 * k, 2 * k); ctx.fillRect(sx + 12 * k, sy + 19 * k, 16 * k, 2 * k);
       return;
     }
     if (n.kind === 'pc') {
-      ctx.fillStyle = '#1d1a26'; ctx.fillRect(sx + 2 * k, sy + 2 * k, 12 * k, 13 * k);
-      ctx.fillStyle = '#9aa3b5'; ctx.fillRect(sx + 3 * k, sy + 3 * k, 10 * k, 11 * k);
-      ctx.fillStyle = Math.floor(this.time / 500) % 2 ? '#5fd3a5' : '#3fae85'; ctx.fillRect(sx + 4 * k, sy + 4 * k, 8 * k, 5 * k);
-      ctx.fillStyle = '#6b7385'; ctx.fillRect(sx + 4 * k, sy + 11 * k, 8 * k, 2 * k);
+      this.shadow(sx, sy, k);
+      ctx.fillStyle = '#c8ccd6'; ctx.beginPath(); ctx.roundRect(sx + 8 * k, sy + 4 * k, 32 * k, 40 * k, 5 * k); ctx.fill();
+      const on = Math.floor(this.time / 600) % 2;
+      const g = ctx.createLinearGradient(0, sy + 8 * k, 0, sy + 26 * k);
+      g.addColorStop(0, on ? '#7ff0c4' : '#5fd3a5'); g.addColorStop(1, '#2f9e78');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(sx + 12 * k, sy + 8 * k, 24 * k, 18 * k, 3 * k); ctx.fill();
+      ctx.fillStyle = '#8a90a0'; ctx.fillRect(sx + 12 * k, sy + 32 * k, 24 * k, 4 * k);
       return;
     }
-    const pal = palette(['nurse', 'shop', 'prof', 'guard'].includes(n.kind) ? n.kind : 'npc', n.sprite ?? 0);
-    ctx.drawImage(characterCanvas(pal, n.d ?? 'd', 0), sx, sy - 3 * k, 16 * k, 16 * k);
-    if (n.kind === 'leader' || n.kind === 'champion') {
-      ctx.fillStyle = '#ffd84a';
-      ctx.fillRect(sx + 6 * k, sy - 4 * k, 4 * k, 2 * k);
-    }
+    const pk = ['nurse', 'shop', 'prof', 'guard', 'leader', 'champion'].includes(n.kind) ? n.kind : 'npc';
+    this.shadow(sx, sy, k);
+    ctx.drawImage(characterCanvas(palette(pk, n.sprite ?? 0), n.d ?? 'd', 0), sx, sy - (CHAR_H - T) * k, CHAR_W * k, CHAR_H * k);
   }
 }

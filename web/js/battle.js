@@ -1,11 +1,13 @@
 // Bramblekin — écran de combat : scène animée (canvas 256 × 144), barres de PV, menus, lecture du journal envoyé par le serveur.
 import { t, pick } from './i18n.js';
-import { creatureCanvas, TYPE_COLORS, characterCanvas, palette } from './sprites.js';
+import { creatureCanvas, TYPE_COLORS, characterCanvas, palette, shade } from './sprites.js';
+import { theme } from './tiles.js';
 import { sfx } from './audio.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const W = 256;
 const H = 144;
+const RES = 4;                 // le canvas est en 1024 × 576 ; on dessine en coordonnées 256 × 144
 
 export class BattleView {
   constructor(root, { content, send, onClose, fast = false }) {
@@ -17,7 +19,7 @@ export class BattleView {
     this.queue = Promise.resolve();
     this.open = false;
     root.innerHTML = `
-      <div class="b-scene"><canvas width="${W}" height="${H}"></canvas>
+      <div class="b-scene"><canvas width="${W * RES}" height="${H * RES}"></canvas>
         <div class="hpbox foe"><div class="hp-name"><b></b><span class="lv"></span><span class="st"></span></div><div class="bar"><i></i></div><div class="balls"></div></div>
         <div class="hpbox mine"><div class="hp-name"><b></b><span class="lv"></span><span class="st"></span></div><div class="bar"><i></i></div><div class="hp-num"></div><div class="xpbar"><i></i></div></div>
         <div class="b-timer" hidden></div>
@@ -516,19 +518,49 @@ export class BattleView {
 
   draw() {
     const ctx = this.ctx;
-    ctx.imageSmoothingEnabled = false;
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, '#bfe6ff'); g.addColorStop(0.55, '#e9f7e4'); g.addColorStop(1, '#a8d88f');
-    ctx.fillStyle = g;
+    ctx.setTransform(RES, 0, 0, RES, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    const now = performance.now();
+    const th = theme(this.themeOf?.() ?? 1);
+    const inside = this.placeOf?.() === 'gym' || this.placeOf?.() === 'inside';
+    // ciel et lointains
+    const sky = ctx.createLinearGradient(0, 0, 0, H);
+    if (inside) { sky.addColorStop(0, '#3b3150'); sky.addColorStop(0.6, '#6d5a7e'); sky.addColorStop(1, '#a88f8a'); }
+    else { sky.addColorStop(0, '#7cc4f5'); sky.addColorStop(0.55, '#cfeefe'); sky.addColorStop(1, shade(th.gl, 0.2)); }
+    ctx.fillStyle = sky;
     ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = '#8cc77a';
-    ctx.beginPath(); ctx.ellipse(186, 80, 52, 12, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(70, 132, 62, 13, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#76b366';
-    ctx.beginPath(); ctx.ellipse(186, 82, 44, 8, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(70, 134, 52, 9, 0, 0, Math.PI * 2); ctx.fill();
+    if (!inside) {
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      for (let i = 0; i < 4; i++) {
+        const cx = ((i * 83 + now / 400) % (W + 60)) - 30; const cy = 14 + (i % 2) * 10;
+        for (const [dx, r] of [[0, 7], [8, 9], [17, 6]]) { ctx.beginPath(); ctx.arc(cx + dx, cy, r, 0, Math.PI * 2); ctx.fill(); }
+      }
+      for (const [col, base, amp, f] of [[shade(th.t, 0.35), 70, 8, 0.03], [th.t, 82, 6, 0.05]]) {
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.moveTo(0, H);
+        for (let x = 0; x <= W; x += 4) ctx.lineTo(x, base - Math.sin(x * f + base) * amp - Math.sin(x * f * 2.3) * amp * 0.4);
+        ctx.lineTo(W, H); ctx.fill();
+      }
+    } else {
+      ctx.fillStyle = 'rgba(255,220,160,0.12)';
+      for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.moveTo(30 + i * 50, 0); ctx.lineTo(50 + i * 50, 0); ctx.lineTo(80 + i * 50, H); ctx.lineTo(40 + i * 50, H); ctx.fill(); }
+    }
+    const field = ctx.createLinearGradient(0, 78, 0, H);
+    field.addColorStop(0, inside ? '#8f7a6a' : th.g); field.addColorStop(1, inside ? '#5c4a40' : th.gd);
+    ctx.fillStyle = field;
+    ctx.fillRect(0, 84, W, H - 84);
+    // plateformes
+    for (const [cx, cy, rx, ry] of [[186, 82, 54, 13], [70, 132, 66, 15]]) {
+      const g = ctx.createRadialGradient(cx - rx * 0.3, cy - ry * 0.6, 2, cx, cy, rx);
+      g.addColorStop(0, shade(inside ? '#c9b6a3' : th.gl, 0.2)); g.addColorStop(1, inside ? '#7a6555' : th.gd);
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      ctx.beginPath(); ctx.ellipse(cx + 3, cy + 4, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+    }
     if (this.anim.trainer) {
-      ctx.drawImage(characterCanvas(palette('npc', this.anim.trainer.sprite), 'd', 0), 162, 22, 48, 48);
+      ctx.drawImage(characterCanvas(palette('npc', this.anim.trainer.sprite), 'd', 0), 166, 10, 42, 56);
     }
     for (const side of [1, 0]) {
       const a = this.anim[side];
@@ -536,41 +568,47 @@ export class BattleView {
       const sp = this.species(a.sp);
       if (!sp) continue;
       const img = creatureCanvas(sp);
-      const size = side === 1 ? 64 : 80;
-      let x = side === 1 ? 154 : 30;
-      let y = side === 1 ? 20 : 58;
-      if (a.center) { x = 88; y = 30; }
+      const size = side === 1 ? 66 : 84;
+      let x = side === 1 ? 153 : 28;
+      let y = side === 1 ? 18 : 55;
+      if (a.center) { x = 86; y = 28; }
+      const breathe = 1 + Math.sin(now / 420 + side * 2) * 0.018;
       ctx.save();
+      ctx.globalAlpha = a.alpha * 0.25;
+      ctx.fillStyle = '#000';
+      ctx.beginPath(); ctx.ellipse(x + size / 2 + a.dx, y + size - 3, size * 0.32, size * 0.07, 0, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = a.alpha;
-      if (side === 0 && !a.center) {
-        ctx.translate(x + size + a.dx, y + a.dy);
-        ctx.scale(-1, 1);
-        ctx.drawImage(img, 0, 0, size, size);
-      } else {
-        ctx.drawImage(img, x + a.dx, y + a.dy, size, size);
-      }
+      ctx.translate(x + size / 2 + a.dx, y + size + a.dy);
+      ctx.scale(side === 0 && !a.center ? -1 : 1, breathe);
+      ctx.drawImage(img, -size / 2, -size, size, size);
       if (a.flash) {
         ctx.globalCompositeOperation = 'source-atop';
-        ctx.globalAlpha = 0.85;
+        ctx.globalAlpha = 0.8;
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(side === 0 && !a.center ? 0 : x - 2, side === 0 && !a.center ? 0 : y - 2, size + 4, size + 4);
+        ctx.fillRect(-size / 2, -size, size, size);
       }
       ctx.restore();
     }
     const fx = this.anim.fx;
     if (fx) {
-      const p = (performance.now() - fx.t0) / 300;
+      const p = (now - fx.t0) / 320;
       if (p >= 1) this.anim.fx = null;
       else {
         const [c1, , c3] = TYPE_COLORS[fx.type] ?? TYPE_COLORS.normal;
         const cx = fx.side === 1 ? 186 : 70;
         const cy = fx.side === 1 ? 52 : 98;
-        for (let i = 0; i < 10; i++) {
-          const ang = (i / 10) * Math.PI * 2 + p * 3;
-          const r = 6 + p * 26;
-          ctx.fillStyle = i % 2 ? c1 : c3;
-          ctx.fillRect(Math.round(cx + Math.cos(ang) * r) - 2, Math.round(cy + Math.sin(ang) * r * 0.7) - 2, 4, 4);
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < 14; i++) {
+          const ang = (i / 14) * Math.PI * 2 + p * 3;
+          const r = 4 + p * 30;
+          const g = ctx.createRadialGradient(cx + Math.cos(ang) * r, cy + Math.sin(ang) * r * 0.7, 0, cx + Math.cos(ang) * r, cy + Math.sin(ang) * r * 0.7, 6);
+          g.addColorStop(0, i % 2 ? c3 : c1); g.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = g;
+          ctx.globalAlpha = 1 - p;
+          ctx.beginPath(); ctx.arc(cx + Math.cos(ang) * r, cy + Math.sin(ang) * r * 0.7, 6, 0, Math.PI * 2); ctx.fill();
         }
+        ctx.restore();
       }
     }
     const orb = this.anim.orb;
@@ -578,12 +616,19 @@ export class BattleView {
       ctx.save();
       ctx.translate(orb.x, orb.y);
       ctx.rotate(orb.wobble);
-      ctx.fillStyle = '#1d1a26'; ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#e84a4a'; ctx.beginPath(); ctx.arc(0, 0, 5, Math.PI, 0); ctx.fill();
-      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI); ctx.fill();
-      ctx.fillStyle = '#1d1a26'; ctx.fillRect(-5, -0.5, 10, 1);
-      ctx.fillStyle = orb.phase === 'caught' ? '#ffd84a' : '#ffffff'; ctx.fillRect(-1, -1, 2, 2);
+      const r = 6;
+      const g = ctx.createRadialGradient(-2, -3, 0.5, 0, 0, r);
+      g.addColorStop(0, '#ffb0b0'); g.addColorStop(0.5, '#e84a4a'); g.addColorStop(1, '#9b2424');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, r, Math.PI, 0); ctx.fill();
+      ctx.fillStyle = '#f2f3f6'; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI); ctx.fill();
+      ctx.fillStyle = '#2b2a3a'; ctx.fillRect(-r, -0.6, 2 * r, 1.2);
+      ctx.fillStyle = orb.phase === 'caught' ? '#ffd84a' : '#ffffff';
+      ctx.beginPath(); ctx.arc(0, 0, 1.8, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
+      if (orb.phase === 'caught') {
+        ctx.fillStyle = '#ffe66d';
+        for (let i = 0; i < 3; i++) { const a = now / 300 + i * 2.1; ctx.beginPath(); ctx.arc(orb.x + Math.cos(a) * 12, orb.y - 6 + Math.sin(a) * 5, 1.6, 0, Math.PI * 2); ctx.fill(); }
+      }
     }
   }
 }

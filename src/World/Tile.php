@@ -23,9 +23,16 @@ final class Tile
     final public const string INWALL = 'W';
     final public const string BRIDGE = 'b';
     final public const string SAND = 's';
+    final public const string RUG = 'm';
+    final public const string COUNTER = 'C';
+    final public const string SHELF = 'S';
+    final public const string PLANT = 'p';
+    final public const string BENCH = 'k';
+    final public const string BED = 'Q';
+    final public const string TABLE = 'B';
 
     /** Cases où l'on peut marcher. */
-    final public const string WALKABLE = '.,"f' . 'D_bs';
+    final public const string WALKABLE = '.,"f' . 'D_bsm';
 
     public static function walkable(string $tile): bool
     {

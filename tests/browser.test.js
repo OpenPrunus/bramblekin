@@ -5,7 +5,7 @@ import test, { describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { Bot, PHP, ROOT, freePort, sleep, startGameServer, waitFor } from './helpers.js';
+import { Bot, PHP, ROOT, freePort, leaveHome, sleep, startGameServer, waitFor, walkTo } from './helpers.js';
 import { launchChrome } from './cdp.js';
 
 let BASE, php, game, c;
@@ -30,6 +30,13 @@ after(async () => {
 const ev = (x) => c.ev(x);
 const shot = (name) => (shots ? c.shot(path.join(shots, `${name}.png`)) : null);
 
+/** Va jusqu'à une case (ou une porte) de la carte courante et attend d'y arriver ou de changer de carte. */
+async function go(x, y, zoneAfter = null) {
+  await ev(`window.__bramble.path = window.__bramble.world.path(${x}, ${y})`);
+  if (zoneAfter) await waitFor(() => ev(`window.__bramble.zoneInfo.id === ${JSON.stringify(zoneAfter)}`), 20000, `carte ${zoneAfter}`);
+}
+
+/** Début d'une partie, comme un vrai joueur : présentation du professeur, chambre, laboratoire, choix d'un orbe. */
 async function start(device, name) {
   await c.device(device);
   await c.call('Storage.clearDataForOrigin', { origin: BASE, storageTypes: 'local_storage' });
@@ -37,10 +44,31 @@ async function start(device, name) {
   await waitFor(() => ev('!!window.__bramble'), 10000, 'page');
   await ev(`window.BRAMBLE_FAST = true; localStorage.setItem('bramblekin.lang', 'fr')`);
   await ev(`document.getElementById('name').value = ${JSON.stringify(name)}; document.getElementById('btn-play').click()`);
-  await waitFor(() => ev("!document.getElementById('starter').hidden"), 10000, 'choix du compagnon');
-  assert.equal(await ev("document.querySelectorAll('.starter').length"), 3);
-  await ev("document.querySelectorAll('.starter')[0].click()");
-  await waitFor(() => ev('window.__bramble.inGame'), 10000, 'première carte');
+  await waitFor(() => ev("window.__bramble.panels.modalKind === 'intro'"), 10000, 'présentation du professeur');
+  assert.equal(await ev("window.__bramble.zoneInfo.id"), 'ha1', 'on se réveille dans sa chambre');
+  await shot(`${name}-intro`);
+  await sleep(500);
+  for (let i = 0; i < 4; i++) { await ev("document.querySelector('#modal-box .primary').click()"); await sleep(60); }
+  await waitFor(() => ev("document.getElementById('modal').hidden"), 3000, 'fin de la présentation');
+  // la mère parle du professeur
+  await go(3, 4);
+  await waitFor(() => ev('!window.__bramble.world.me.moving && window.__bramble.path.length === 0'), 8000, 'devant la mère');
+  await ev(`window.__bramble.path = ['u!']`);
+  await waitFor(() => ev("!document.getElementById('dialog').hidden"), 5000, 'dialogue de la mère');
+  assert.match(await ev("document.getElementById('dialog-text').textContent"), /laboratoire/);
+  await ev("document.getElementById('dialog').click()");
+  // le laboratoire, en bas à droite du bourg
+  await go(5, 8, 't1');
+  await go(23, 17, 'hb1');
+  await go(5, 3);
+  await waitFor(() => ev("window.__bramble.panels.modalKind === 'pick'"), 15000, 'orbe examiné');
+  await shot(`${name}-pick`);
+  await sleep(500);
+  await ev("document.querySelector('#modal-box .primary').click()");
+  await waitFor(() => ev('window.__bramble.profile.team.length === 1'), 5000, 'compagnon reçu');
+  await waitFor(() => ev("!document.getElementById('dialog').hidden"), 5000, 'remerciements');
+  await ev("document.getElementById('dialog').click()");
+  await go(5, 8, 't1');
 }
 
 /** Aucun débordement horizontal, cibles tactiles assez grandes. */
@@ -52,20 +80,20 @@ async function checkLayout(touch) {
   }
 }
 
-async function walkTo(x, y) {
-  await ev(`window.__bramble.path = window.__bramble.world.path(${x}, ${y})`);
-}
 
 describe('Bramblekin dans Chrome', () => {
   test('ordinateur : compagnon, ville, infirmière, route, combat sauvage, menus', async () => {
     await start({ w: 1100, h: 700 }, 'Navigo');
     await shot('desk-town');
     assert.equal(await ev('window.__bramble.zoneInfo.id'), 't1');
-    // parler à l'infirmière en touchant la carte
-    await ev(`(() => { const n = window.__bramble.world.zone.npcs.find((n) => n.kind === 'nurse'); window.__bramble.path = window.__bramble.world.path(n.x, n.y); })()`);
+    // entrer dans le centre de soin et parler à l'infirmière par-dessus le comptoir
+    await go(7, 7, 'c1');
+    await go(5, 1);
     await waitFor(() => ev("!document.getElementById('dialog').hidden"), 15000, 'dialogue');
     assert.match(await ev("document.getElementById('dialog-text').textContent"), /pleine forme|fighting fit/);
+    await shot('desk-center');
     await ev("document.getElementById('dialog').click()");
+    await go(5, 8, 't1');
     // menus
     for (const tab of ['team', 'bag', 'dex', 'map', 'code', 'options']) {
       await ev(`window.__bramble.panels.open('${tab}')`);
@@ -74,7 +102,7 @@ describe('Bramblekin dans Chrome', () => {
     }
     await ev('window.__bramble.panels.close()');
     // au nord : la route 1 ; dans les herbes : une rencontre
-    await walkTo(14, 0);
+    await go(14, 0);
     await waitFor(() => ev("window.__bramble.zoneInfo.id === 'r1'"), 20000, 'route 1');
     await ev(`(() => { const a = window.__bramble; const w = a.world; let best = null;
       w.zone.rows.forEach((row, y) => { for (let x = 0; x < row.length; x++) if (row[x] === '"' && w.free(x, y)) { const d = Math.abs(x - w.me.x) + Math.abs(y - w.me.y); if (!best || d < best[2]) best = [x, y, d]; } });
@@ -100,6 +128,8 @@ describe('Bramblekin dans Chrome', () => {
     await checkLayout(true);
     const bot = await new Bot(game.url).open();
     await bot.join('Robot', 4);
+    await leaveHome(bot);
+    await walkTo(bot, 23, 19);
     await waitFor(() => ev('window.__bramble.world.peers.size === 1'), 5000, 'le robot est visible');
     await shot('phone-peer');
     // toucher le robot ouvre son menu
@@ -132,7 +162,7 @@ describe('Bramblekin dans Chrome', () => {
   test('téléphone en paysage : carte et combat tiennent à l\'écran', async () => {
     await start({ w: 844, h: 390, touch: true }, 'Paysa');
     await checkLayout(true);
-    await walkTo(14, 0);
+    await go(14, 0);
     await waitFor(() => ev("window.__bramble.zoneInfo.id === 'r1'"), 20000, 'route 1');
     await ev(`(() => { const a = window.__bramble; const w = a.world; let best = null;
       w.zone.rows.forEach((row, y) => { for (let x = 0; x < row.length; x++) if (row[x] === '"' && w.free(x, y)) { const d = Math.abs(x - w.me.x) + Math.abs(y - w.me.y); if (!best || d < best[2]) best = [x, y, d]; } });

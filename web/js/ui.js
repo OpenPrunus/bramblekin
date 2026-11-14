@@ -1,6 +1,6 @@
 // Bramblekin — panneaux : équipe, sac, bestiaire, carte, classement, code, options ; boutique, boîte, échange, invitations.
 import { t, pick, getLang } from './i18n.js';
-import { creatureCanvas, TYPE_COLORS, LOOKS } from './sprites.js';
+import { creatureCanvas, TYPE_COLORS, LOOKS, SPRITE_SIZE, characterCanvas, palette } from './sprites.js';
 import { soundOn } from './audio.js';
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -8,7 +8,7 @@ export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&a
 /** Image d'une créature (canvas copié, agrandi par le CSS). */
 export function kinImg(sp, cls = '', silhouette = false) {
   const c = document.createElement('canvas');
-  c.width = 32; c.height = 32;
+  c.width = SPRITE_SIZE; c.height = SPRITE_SIZE;
   c.className = `kin ${cls}`;
   if (sp) c.getContext('2d').drawImage(creatureCanvas(sp, { silhouette }), 0, 0);
   return c;
@@ -405,21 +405,38 @@ export class Panels {
     box.querySelector('.row').classList.add('col');
   }
 
-  starter(onPick) {
-    const el = document.getElementById('starter');
-    const list = el.querySelector('.starters');
-    list.innerHTML = '';
-    for (const id of this.app.content.starters) {
-      const sp = this.species(id);
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'starter';
-      b.append(kinImg(sp, 'big'));
-      b.insertAdjacentHTML('beforeend', `<b>${esc(sp.name)}</b><div class="types">${sp.types.map(typeBadge).join('')}</div><span class="choose">${t('choose')}</span>`);
-      b.addEventListener('click', () => onPick(id));
-      list.append(b);
-    }
-    el.hidden = false;
+  /** Au laboratoire : l'orbe examiné montre son compagnon ; on confirme ou on regarde les autres. */
+  starterPick(id, onPick) {
+    const sp = this.species(id);
+    const box = this.showModal(`<div class="pick"></div><h3>${esc(sp.name)}</h3><div class="types center-row">${sp.types.map(typeBadge).join('')}</div><p>${esc(t('pickAsk', { n: sp.name }))}</p>`, { dismiss: false });
+    box.querySelector('.pick').append(kinImg(sp, 'big'));
+    this.modalKind = 'pick';
+    this.actions(box, [
+      [t('yes'), () => { this.closeModal(); onPick(id); }, 'primary'],
+      [t('no'), () => this.closeModal()],
+    ]);
+  }
+
+  /** Présentation du monde par le professeur, la toute première fois. */
+  intro(name, onDone) {
+    let i = 1;
+    const box = this.showModal('<div class="prof-portrait"></div><p class="intro-text"></p><div class="intro-kins"></div>', { dismiss: false });
+    this.modalKind = 'intro';
+    box.classList.add('intro');
+    const portrait = box.querySelector('.prof-portrait');
+    const face = document.createElement('canvas');
+    face.width = 48; face.height = 64;
+    face.getContext('2d').drawImage(characterCanvas(palette('prof', 0), 'd', 0), 0, 0);
+    portrait.append(face);
+    const kins = box.querySelector('.intro-kins');
+    for (const id of [1, 4, 7, 22, 49]) kins.append(kinImg(this.species(id)));
+    const text = box.querySelector('.intro-text');
+    const show = () => { text.textContent = t(`intro${i}`, { n: name }); };
+    show();
+    this.actions(box, [
+      [t('next'), () => { i++; if (i > 4) { this.closeModal(); box.classList.remove('intro'); onDone(); } else show(); }, 'primary'],
+      [t('introSkip'), () => { this.closeModal(); box.classList.remove('intro'); onDone(); }],
+    ]);
   }
 
   lang() { return getLang(); }

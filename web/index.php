@@ -61,14 +61,6 @@ $ws = (string) getenv('BRAMBLE_WS');
     </div>
   </section>
 
-  <section id="starter" class="screen" hidden>
-    <div class="title-card wide">
-      <h2 data-i18n="starterTitle"></h2>
-      <p data-i18n="starterHint"></p>
-      <div class="starters"></div>
-    </div>
-  </section>
-
   <section id="battle" hidden></section>
 
   <section id="sheet" hidden>

@@ -58,8 +58,15 @@ final class HubTest extends TestCase
         $t = new FakeTransport();
         $c = $hub->accept($t);
         $hub->receive($c, json_encode(['t' => 'hello', 'name' => $name, 'token' => str_pad($token, 32, 'x')], JSON_THROW_ON_ERROR));
-        if ($starter && ($t->last('welcome')['starter'] ?? false) === true) {
+        $fresh = $starter && ($t->last('welcome')['starter'] ?? false) === true;
+        if ($fresh) {
             $hub->receive($c, '{"t":"starter","sp":7}');
+        }
+        if ($fresh && $c->profile !== null) {
+            // sur la place de Bourg-Ronce, comme avant le scénario d'introduction
+            $hub->presence->leave($c, $c->profile->zone);
+            [$c->profile->zone, $c->profile->x, $c->profile->y, $c->profile->dir] = ['t1', 15, 13, 'u'];
+            $hub->presence->enter($c);
         }
 
         return [$c, $t];
@@ -92,14 +99,11 @@ final class HubTest extends TestCase
         $welcome = $t->last('welcome');
         self::assertTrue($welcome['starter']);
         self::assertCount(150, $welcome['content']['species']);
-        self::assertNull($t->last('zone'), 'pas de carte avant le choix du compagnon');
-        self::send($hub, $c, ['t' => 'step', 'd' => 'u', 'n' => 1]);
-        self::assertSame('no_starter', $t->last('error')['code']);
+        $zone = $t->last('zone');
+        self::assertSame('ha1', $zone['zone']['id'], 'on commence dans sa chambre');
         self::send($hub, $c, ['t' => 'starter', 'sp' => 2]);
         self::assertSame('bad_starter', $t->last('error')['code']);
         self::send($hub, $c, ['t' => 'starter', 'sp' => 4]);
-        $zone = $t->last('zone');
-        self::assertSame('t1', $zone['zone']['id']);
         self::assertSame(4, $t->last('profile')['profile']['team'][0]['sp']);
         self::assertSame(5, $t->last('profile')['profile']['team'][0]['lv']);
         // un deuxième joueur avec le même pseudo est refusé
@@ -186,7 +190,7 @@ final class HubTest extends TestCase
         self::assertNotNull($p);
         $p->team[0]->hp = 1;
         $p->money = 4321;
-        [$p->x, $p->y, $p->dir] = [7, 9, 'u'];
+        [$p->zone, $p->x, $p->y, $p->dir] = ['c1', 5, 3, 'u'];
         self::send($hub, $a, ['t' => 'interact']);
         self::assertSame('nurse', $ta->last('say')['text']);
         self::assertSame($p->team[0]->maxHp(), $p->team[0]->hp);
@@ -195,7 +199,45 @@ final class HubTest extends TestCase
         self::assertNotNull($ta->last('kicked'));
         self::assertFalse($ta2->last('welcome')['starter']);
         self::assertSame(4321, $ta2->last('welcome')['profile']['money']);
-        self::assertSame([7, 9], [$a2->profile?->x, $a2->profile?->y]);
+        self::assertSame(['c1', 5, 3], [$a2->profile?->zone, $a2->profile?->x, $a2->profile?->y]);
+        self::assertSame(1, $a2->profile?->healTown);
+    }
+
+    public function testIntroductionHomeProfessorAndLab(): void
+    {
+        $hub = $this->hub();
+        [$a, $ta] = $this->join($hub, 'Alice', 'alice', false);
+        $p = $a->profile;
+        self::assertNotNull($p);
+        self::assertSame(['ha1', 5, 5], [$p->zone, $p->x, $p->y]);
+        // la mère parle du professeur
+        [$p->x, $p->y, $p->dir] = [4, 3, 'l'];
+        self::send($hub, $a, ['t' => 'interact']);
+        self::assertSame('homeStart', $ta->last('say')['text']);
+        // sortir de la ville sans compagnon : le professeur arrête le joueur
+        $hub->presence->leave($a, $p->zone);
+        [$p->zone, $p->x, $p->y] = ['t1', 14, 1];
+        $hub->presence->enter($a);
+        $this->walk($hub, $a, 'u');
+        self::assertSame('profStop', $ta->last('say')['text']);
+        self::assertSame(['t1', 14, 1], [$p->zone, $p->x, $p->y]);
+        // au laboratoire : un orbe montre son compagnon, le choix le donne et fait disparaître les orbes
+        $hub->presence->leave($a, $p->zone);
+        [$p->zone, $p->x, $p->y, $p->dir] = ['hb1', 5, 4, 'u'];
+        $hub->presence->enter($a);
+        self::assertCount(3, array_filter($ta->last('zone')['zone']['npcs'], static fn (array $n): bool => $n['kind'] === 'starter'));
+        self::send($hub, $a, ['t' => 'interact']);
+        self::assertSame(4, $ta->last('starterPick')['sp']);
+        self::send($hub, $a, ['t' => 'starter', 'sp' => 4]);
+        self::assertSame('labThanks', $ta->last('say')['text']);
+        self::assertCount(3, $ta->of('npcGone'));
+        self::assertSame(4, $p->team[0]->species);
+        // ensuite le chemin du nord est libre
+        $hub->presence->leave($a, $p->zone);
+        [$p->zone, $p->x, $p->y] = ['t1', 14, 1];
+        $hub->presence->enter($a);
+        $this->walk($hub, $a, 'u');
+        self::assertSame('r1', $p->zone);
     }
 
     public function testShopAndItems(): void
@@ -206,7 +248,7 @@ final class HubTest extends TestCase
         self::assertNotNull($p);
         self::send($hub, $a, ['t' => 'buy', 'item' => 'orb', 'n' => 1]);
         self::assertSame('bad_buy', $ta->last('error')['code'], 'loin de la boutique');
-        [$p->x, $p->y, $p->dir] = [23, 9, 'u'];
+        [$p->zone, $p->x, $p->y, $p->dir] = ['s1', 5, 3, 'u'];
         self::send($hub, $a, ['t' => 'interact']);
         self::assertContains('orb', array_column($ta->last('shop')['items'], 'id'));
         self::assertNotContains('orb3', array_column($ta->last('shop')['items'], 'id'));

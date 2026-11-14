@@ -148,6 +148,7 @@ final class Presence
         return static fn (Npc $n): bool => match ($n->kind) {
             'guard' => $p->badgeCount() < $n->need,
             'item' => !isset($p->done[$n->id]),
+            'starter' => !$p->hasStarter(),
             default => true,
         };
     }

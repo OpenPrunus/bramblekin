@@ -106,5 +106,42 @@ export class Bot {
   close() { try { this.ws.close(); } catch { /* déjà fermé */ } }
 }
 
+const STEPS = { u: [0, -1], d: [0, 1], l: [-1, 0], r: [1, 0] };
+
+/** Marche jusqu'à (x, y) sur la carte courante du robot (parcours en largeur, un pas toutes les 160 ms). */
+export async function walkTo(b, x, y, stopIf = () => false) {
+  const z = b.last('zone');
+  const rows = z.zone.rows;
+  const blocked = new Set(z.zone.npcs.map((n) => `${n.x},${n.y}`));
+  const me = b.last('pos')?.zone === z.zone.id ? b.last('pos') : z.me;
+  const ok = (px, py) => '.,"fD_bsm'.includes(rows[py]?.[px] ?? 'T') && !blocked.has(`${px},${py}`);
+  const prev = new Map([[`${me.x},${me.y}`, null]]);
+  const queue = [[me.x, me.y]];
+  while (queue.length) {
+    const [cx, cy] = queue.shift();
+    if (cx === x && cy === y) break;
+    for (const [d, [dx, dy]] of Object.entries(STEPS)) {
+      const k = `${cx + dx},${cy + dy}`;
+      if (!prev.has(k) && ok(cx + dx, cy + dy)) { prev.set(k, [`${cx},${cy}`, d]); queue.push([cx + dx, cy + dy]); }
+    }
+  }
+  const dirs = [];
+  for (let k = `${x},${y}`; prev.get(k);) { const [from, d] = prev.get(k); dirs.unshift(d); k = from; }
+  if (!prev.has(`${x},${y}`)) throw new Error(`pas de chemin vers ${x},${y} dans ${z.zone.id}`);
+  for (const d of dirs) {
+    if (stopIf()) return;
+    b.send({ t: 'step', d, n: Date.now() });
+    await sleep(160);
+  }
+}
+
+/** De la maison de départ jusqu'à la place de Bourg-Ronce. */
+export async function leaveHome(b) {
+  if (b.last('zone').zone.id !== 'ha1') return;
+  const seen = b.messages.length;
+  await walkTo(b, 5, 8);
+  await waitFor(() => b.messages.slice(seen).find((m) => m.t === 'zone'), 3000, 'sortie de la maison');
+}
+
 export const token = (seed) => (seed + 'x'.repeat(32)).slice(0, 32).replace(/[^A-Za-z0-9_-]/g, 'a');
 

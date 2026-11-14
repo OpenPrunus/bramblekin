@@ -17,7 +17,8 @@ final class WorldTest extends TestCase
     public function testTenTownsNineRoutesEightGymsAndTheLeague(): void
     {
         $zones = World::zones();
-        self::assertCount(28, $zones);
+        self::assertCount(60, $zones);
+        self::assertCount(32, array_filter($zones, static fn (Zone $z): bool => $z->kind === 'inside'));
         self::assertCount(10, array_filter($zones, static fn (Zone $z): bool => $z->kind === 'town'));
         self::assertCount(9, array_filter($zones, static fn (Zone $z): bool => $z->kind === 'route'));
         $leaders = [];
@@ -93,17 +94,19 @@ final class WorldTest extends TestCase
     public function testEveryCharacterCanBeTalkedTo(): void
     {
         foreach (World::zones() as $zone) {
-            $start = match ($zone->kind) {
+            [$x, $y] = match ($zone->kind) {
                 'route' => [11, $zone->height() - 2],
-                'town' => $zone->id === 't1' ? World::start() : [0, 14, $zone->height() - 2],
-                default => [0, 6, $zone->height() - 2],
+                'town' => $zone->id === 't1' ? [15, 13] : [14, $zone->height() - 2],
+                'inside' => [World::IW >> 1, World::IH - 2],
+                default => [6, $zone->height() - 2],
             };
-            [$x, $y] = $zone->kind === 'route' ? $start : [$start[1], $start[2]];
             $reach = Grid::reachable($zone->rows, $x, $y, self::blocked($zone, true));
             foreach ($zone->npcs as $npc) {
                 $ok = false;
                 foreach ([[1, 0], [-1, 0], [0, 1], [0, -1]] as [$dx, $dy]) {
                     $ok = $ok || isset($reach[($npc->x + $dx) . ',' . ($npc->y + $dy)]);
+                    // par-dessus un comptoir
+                    $ok = $ok || ($zone->tile($npc->x + $dx, $npc->y + $dy) === Tile::COUNTER && isset($reach[($npc->x + 2 * $dx) . ',' . ($npc->y + 2 * $dy)]));
                 }
                 self::assertTrue($ok, "{$npc->id} inaccessible");
                 self::assertFalse(Tile::walkable($zone->tile($npc->x, $npc->y)) && $zone->warpAt($npc->x, $npc->y) !== null);
@@ -133,6 +136,28 @@ final class WorldTest extends TestCase
                     self::assertSame(World::formAt(self::base($species), $level), $species, "{$npc->id} : forme cohérente avec le niveau");
                 }
             }
+        }
+    }
+
+    public function testEveryTownBuildingCanBeEnteredAndLeft(): void
+    {
+        for ($t = 1; $t <= World::TOWNS; $t++) {
+            $town = World::zone("t$t");
+            self::assertNotNull($town);
+            foreach ([[7, 7], [23, 7], [7, 17], [23, 17]] as [$x, $y]) {
+                $warp = $town->warpAt($x, $y);
+                self::assertNotNull($warp, "porte ($x, $y) de la ville $t");
+                $inside = World::zone($warp->zone);
+                self::assertNotNull($inside);
+                $out = $inside->warps[count($inside->warps) - 1];
+                self::assertSame("t$t", $out->zone);
+                self::assertSame([$x, $y + 1], [$out->toX, $out->toY], "on ressort devant la porte de {$inside->id}");
+            }
+            [$zone, $hx, $hy] = World::healSpot($t);
+            $center = World::zone($zone);
+            self::assertNotNull($center);
+            self::assertSame(Tile::COUNTER, $center->tile($hx, $hy - 1));
+            self::assertSame('nurse', $center->npc("c$t.nurse")?->kind);
         }
     }
 

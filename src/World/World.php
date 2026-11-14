@@ -25,6 +25,8 @@ final class World
     final public const int GW = 13;
     final public const int GH = 15;
     final public const string START = 't1';
+    final public const int IW = 11;
+    final public const int IH = 9;
 
     /**
      * @var array<string, Zone>|null
@@ -48,6 +50,14 @@ final class World
                 }
             }
             $zones['league'] = self::league();
+            for ($i = 1; $i <= self::TOWNS; $i++) {
+                $zones["c$i"] = self::inside('center', $i);
+                $zones["s$i"] = self::inside('shop', $i);
+                $zones["hb$i"] = self::inside('house', $i, 'b');
+                if ($i === 1 || $i === self::TOWNS) {
+                    $zones["ha$i"] = self::inside('house', $i, 'a');
+                }
+            }
             self::$zones = $zones;
         }
 
@@ -60,21 +70,21 @@ final class World
     }
 
     /**
-     * Point de départ d'une partie, et point de soin par défaut : devant l'infirmière de Bourg-Ronce.
+     * Point de départ d'une partie : la maison du joueur, à Bourg-Ronce.
      * @return array{0: string, 1: int, 2: int}
      */
     public static function start(): array
     {
-        return [self::START, 15, 13];
+        return ['ha1', 5, 5];                                         // on commence dans sa chambre
     }
 
     /**
-     * Case où se tenir pour parler à l'infirmière de la ville `$i`.
+     * Case où se tenir pour parler à l'infirmière de la ville `$i` (dans le centre de soin, devant le comptoir).
      * @return array{0: string, 1: int, 2: int}
      */
     public static function healSpot(int $town): array
     {
-        return ["t$town", 7, 9];
+        return ["c$town", 5, 3];
     }
 
     private static function rng(string $seed): Randomizer
@@ -178,24 +188,20 @@ final class World
         $npcs = [];
         $warps = [];
         // bâtiments : centre de soin (A), boutique (B), arène ou maison (C), maison (D)
-        self::building($g, 4, 4, Tile::SHUT, 8);
-        self::building($g, 20, 4, Tile::SHUT, 8);
-        self::building($g, 4, 14, $hasGym ? Tile::DOOR : Tile::SHUT, 18);
-        self::building($g, 20, 14, Tile::SHUT, 18);
+        // toutes les portes s'ouvrent : centre de soin, boutique, arène ou maison, maison
+        self::building($g, 4, 4, Tile::DOOR, 8);
+        self::building($g, 20, 4, Tile::DOOR, 8);
+        self::building($g, 4, 14, Tile::DOOR, 18);
+        self::building($g, 20, 14, Tile::DOOR, 18);
         $g->rect(7, 18, 1, 1, Tile::PATH);
         $g->rect(23, 18, 1, 1, Tile::PATH);
-        $npcs[] = new Npc("t$i.nurse", 'nurse', 7, 8, 'd', 1, 'nurse');
-        $npcs[] = new Npc("t$i.pc", 'pc', 8, 8, 'd', 0, 'pc');
-        $npcs[] = new Npc("t$i.shop", 'shop', 23, 8, 'd', 2, 'shop');
-        if ($hasGym) {
-            $warps[] = new Warp(7, 17, "g$i", 6, self::GH - 2);
-        }
-        $npcs[] = new Npc("t$i.talk1", 'talk', 21, 18, 'd', 3 + $rng->getInt(0, 4), 'talk' . (($i * 2) % 20));
+        [$ix, $iy] = [self::IW >> 1, self::IH - 2];
+        $warps[] = new Warp(7, 7, "c$i", $ix, $iy);
+        $warps[] = new Warp(23, 7, "s$i", $ix, $iy);
+        $warps[] = $hasGym ? new Warp(7, 17, "g$i", 6, self::GH - 2) : new Warp(7, 17, "ha$i", $ix, $iy);
+        $warps[] = new Warp(23, 17, "hb$i", $ix, $iy);
         $npcs[] = new Npc("t$i.talk2", 'talk', 17, 15, 'l', 3 + $rng->getInt(0, 4), 'talk' . (($i * 2 + 1) % 20));
         $npcs[] = new Npc("t$i.sign", 'sign', 12, 20, 'd', 0, "town$i");
-        if ($i === 1) {
-            $npcs[] = new Npc('t1.prof', 'prof', 17, 9, 'l', 8, 'prof');
-        }
         if ($i === self::TOWNS) {
             self::building($g, 12, 3, Tile::DOOR, 7, 6);
             $g->set(14, 7, Tile::PATH);
@@ -561,6 +567,81 @@ final class World
         return new Zone('league', ['fr' => 'Ligue de Cime-Ronce', 'en' => 'Bramble Peak League'], 'gym', 10, self::hall(), [
             new Warp(6, self::GH - 1, 't10', 15, 8),
         ], $npcs, [], 19);
+    }
+
+    /**
+     * Intérieur d'un bâtiment de la ville `$town` : centre de soin (infirmière derrière le comptoir, boîte de stockage),
+     * boutique (vendeur derrière le comptoir, rayonnages) ou maison (un habitant). La porte du bas ramène devant le bâtiment.
+     */
+    private static function inside(string $kind, int $town, string $slot = ''): Zone
+    {
+        $w = self::IW;
+        $h = self::IH;
+        $g = new Grid($w, $h, Tile::FLOOR);
+        for ($y = 0; $y < $h; $y++) {
+            for ($x = 0; $x < $w; $x++) {
+                if ($x === 0 || $x === $w - 1 || $y === 0 || $y === $h - 1) {
+                    $g->set($x, $y, Tile::INWALL);
+                }
+            }
+        }
+        $mid = $w >> 1;
+        $g->set($mid, $h - 1, Tile::DOOR);
+        $g->set($mid, $h - 2, Tile::RUG);
+        $npcs = [];
+        $id = $kind === 'house' ? "h$slot$town" : ($kind === 'center' ? "c$town" : "s$town");
+        $townName = Names::TOWNS[$town - 1];
+        if ($kind === 'center' || $kind === 'shop') {
+            $g->rect(1, 2, $w - 2, 1, Tile::COUNTER);
+            $g->set($mid, 3, Tile::RUG);
+            $npcs[] = $kind === 'center'
+                ? new Npc("$id.nurse", 'nurse', $mid, 1, 'd', 1, 'nurse')
+                : new Npc("$id.shop", 'shop', $mid, 1, 'd', 2, 'shop');
+        }
+        if ($kind === 'center') {
+            $npcs[] = new Npc("$id.pc", 'pc', $w - 2, 4, 'l', 0, 'pc');
+            $g->set(1, $h - 2, Tile::PLANT);
+            $g->set($w - 2, $h - 2, Tile::PLANT);
+            $g->set(1, 4, Tile::BENCH);
+            $g->set(1, 5, Tile::BENCH);
+            $name = ['fr' => "Centre de soin · {$townName['fr']}", 'en' => "{$townName['en']} Healing Centre"];
+        } elseif ($kind === 'shop') {
+            foreach ([1, 2, $w - 3, $w - 2] as $x) {
+                $g->set($x, 4, Tile::SHELF);
+                $g->set($x, 5, Tile::SHELF);
+            }
+            $g->set(1, $h - 2, Tile::PLANT);
+            $name = ['fr' => "Boutique · {$townName['fr']}", 'en' => "{$townName['en']} Shop"];
+        } elseif ($town === 1 && $slot === 'b') {
+            // le laboratoire du professeur : trois orbes sur la table, un compagnon à choisir
+            $g->rect(1, 1, $w - 2, 1, Tile::SHELF);
+            $g->rect(4, 3, 3, 1, Tile::TABLE);
+            $g->set(1, $h - 2, Tile::PLANT);
+            $g->set($w - 2, $h - 2, Tile::PLANT);
+            $npcs[] = new Npc("$id.prof", 'prof', 2, 3, 'r', 8, 'prof');
+            foreach (Dex::STARTERS as $k => $species) {
+                $npcs[] = new Npc("$id.orb$k", 'starter', 4 + $k, 3, 'd', 0, 'starter', [[$species, 5]]);
+            }
+            $name = ['fr' => 'Laboratoire du professeur Aubépine', 'en' => 'Professor Hawthorn\'s Lab'];
+        } else {
+            $g->rect(1, 1, 3, 1, Tile::SHELF);
+            $g->set($w - 2, 1, Tile::BED);
+            $g->set($w - 2, 2, Tile::BED);
+            $g->rect($mid - 1, 4, 3, 1, Tile::TABLE);
+            $g->set(1, $h - 2, Tile::PLANT);
+            $home = $town === 1 && $slot === 'a';
+            $text = $home ? 'home' : 'talk' . (($town * 2 + ($slot === 'a' ? 7 : 0)) % 20);
+            $npcs[] = new Npc("$id.talk", 'talk', $mid - 2, 3, 'r', 3 + ($town + ($slot === 'a' ? 2 : 0)) % 5, $text);
+            $name = ['fr' => $home ? 'Ta maison' : "Maison · {$townName['fr']}", 'en' => $home ? 'Your home' : "{$townName['en']} House"];
+        }
+        $front = match (true) {
+            $kind === 'center' => [7, 8],
+            $kind === 'shop' => [23, 8],
+            $slot === 'a' => [7, 18],
+            default => [23, 18],
+        };
+
+        return new Zone($id, $name, 'inside', $town, $g->rows(), [new Warp($mid, $h - 1, "t$town", $front[0], $front[1])], $npcs, [], $town);
     }
 
     /**
