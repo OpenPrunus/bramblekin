@@ -102,7 +102,7 @@ jobs:
           for i in $(seq 1 30); do curl -fs http://localhost:8080/ >/dev/null && break; sleep 1; done
       - name: Smoke test
         run: |
-          set -eu
+          set -eux
           B=http://localhost:8080
           code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
           test "$(code $B/)" = 200
