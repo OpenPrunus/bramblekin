@@ -98,8 +98,11 @@ export class Bot {
   /** Pseudo, compagnon de départ, première carte. */
   async join(name, starter = 7, tok = token(name)) {
     const w = await this.hello(name, tok);
-    if (w.starter) this.send({ t: 'starter', sp: starter });
     this.zone = await this.next('zone', 5000, true);
+    if (w.starter) {
+      this.send({ t: 'starter', sp: starter });
+      await this.next('profile');
+    }
     return w;
   }
 

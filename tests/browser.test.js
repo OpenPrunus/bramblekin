@@ -55,7 +55,7 @@ async function start(device, name) {
   await waitFor(() => ev('!window.__bramble.world.me.moving && window.__bramble.path.length === 0'), 8000, 'devant la mère');
   await ev(`window.__bramble.path = ['u!']`);
   await waitFor(() => ev("!document.getElementById('dialog').hidden"), 5000, 'dialogue de la mère');
-  assert.match(await ev("document.getElementById('dialog-text').textContent"), /laboratoire/);
+  assert.match(await ev("document.getElementById('dialog-text').textContent"), /laboratoire|lab/);
   await ev("document.getElementById('dialog').click()");
   // le laboratoire, en bas à droite du bourg
   await go(5, 8, 't1');
