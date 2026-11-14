@@ -1,0 +1,34 @@
+services:
+  bramblekin:                       # site web (PHP 8.5 + Apache)
+    build: .
+    ports:
+      - "8094:80"
+    environment:
+      # URL WebSocket vue par le navigateur ; vide = même hôte, port 8081 (ou /ws derrière HTTPS)
+      BRAMBLE_WS: "ws://localhost:8095"
+    volumes:
+      - data:/var/www/html/data
+    restart: unless-stopped
+
+  bramblekin-ws:                    # serveur du monde partagé (même image, autre commande)
+    build: .
+    command: ["php", "/opt/bramblekin/server.php"]
+    user: "33:33"
+    ports:
+      - "8095:8081"
+    volumes:
+      - data:/var/www/html/data     # sauvegardes des joueurs et classement
+    environment:
+      WS_PORT: "8081"
+      WS_ALLOWED_ORIGINS: ""        # ex. "https://bramblekin.exemple.fr" pour restreindre
+      TRUSTED_PROXIES: ""           # reverse proxies dont on croit X-Real-IP (vide = réseaux privés)
+      BRAMBLE_MAX_CONN_PER_IP: "10"
+      BRAMBLE_MAX_ACCOUNTS_PER_IP: "3"
+      BRAMBLE_MAX_PAIR_MATCHES: "4"
+      BRAMBLE_ALLOW_SAME_IP: "0"
+      BRAMBLE_ENCOUNTER_RATE: "0.12"
+      BRAMBLE_TURN_SECONDS: "45"
+    restart: unless-stopped
+
+volumes:
+  data:
