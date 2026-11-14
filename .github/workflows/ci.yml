@@ -110,6 +110,8 @@ jobs:
           for f in main.js world.js battle.js ui.js sprites.js tiles.js i18n.js net.js audio.js; do test "$(code $B/js/$f)" = 200; done
           test "$(code $B/css/style.css)" = 200
           for f in manifest.webmanifest sw.js icons/icon-192.png; do test "$(code $B/$f)" = 200; done
+          # the 3D preview and its vendored three.js
+          for f in 3d/ 3d/demo.js 3d/vendor/three.module.js 3d/zones.json 3d/content.json; do test "$(code $B/$f)" = 200; done
           # the leaderboard API: empty at first, GET only, and it never serves the data directory
           test "$(curl -s $B/api.php)" = '[]'
           test "$(code -X DELETE $B/api.php)" = 405

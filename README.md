@@ -38,6 +38,14 @@ scenery with shadows, animated grass and water, creatures shaded like little toy
 - **Phone friendly**: tap a tile to walk there (path finding), tap a player to challenge them, on-screen pad with A/B buttons,
   portrait and landscape layouts, installable as a PWA.
 
+## 3D preview
+
+`web/3d/` is a standalone preview of the next step (served at `/3d/`): the same 60 maps rendered in real 3D with
+three.js (vendored, MIT), one seamless world with no loading between towns and routes, trainers who spot you and walk up
+to battle, 3D battles, quality profiles for phones and computers (frame-rate cap, adaptive resolution, shadows updated
+only when something moves). It has no server yet: no other players and no saves. `php tools/export-3d.php` regenerates
+its data from the world generator.
+
 ## Quick start
 
 ```bash

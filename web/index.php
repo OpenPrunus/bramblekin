@@ -57,7 +57,7 @@ $ws = (string) getenv('BRAMBLE_WS');
         <button type="button" id="btn-lang"></button>
         <button type="button" id="btn-sound"></button>
       </div>
-      <p class="links"><a href="https://games.prunus.dev" data-i18n="allGames"></a> · <a href="https://github.com/OpenPrunus/bramblekin" target="_blank" rel="noopener noreferrer" data-i18n="github"></a></p>
+      <p class="links"><a href="3d/" data-i18n="preview3d"></a> · <a href="https://games.prunus.dev" data-i18n="allGames"></a> · <a href="https://github.com/OpenPrunus/bramblekin" target="_blank" rel="noopener noreferrer" data-i18n="github"></a></p>
     </div>
   </section>
 
