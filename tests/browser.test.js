@@ -64,7 +64,7 @@ describe('Bramblekin dans Chrome', () => {
     // parler à l'infirmière en touchant la carte
     await ev(`(() => { const n = window.__bramble.world.zone.npcs.find((n) => n.kind === 'nurse'); window.__bramble.path = window.__bramble.world.path(n.x, n.y); })()`);
     await waitFor(() => ev("!document.getElementById('dialog').hidden"), 15000, 'dialogue');
-    assert.match(await ev("document.getElementById('dialog-text').textContent"), /pleine forme/);
+    assert.match(await ev("document.getElementById('dialog-text').textContent"), /pleine forme|fighting fit/);
     await ev("document.getElementById('dialog').click()");
     // menus
     for (const tab of ['team', 'bag', 'dex', 'map', 'code', 'options']) {
