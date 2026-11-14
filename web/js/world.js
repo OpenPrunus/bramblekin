@@ -33,12 +33,15 @@ export class World {
     this.dpr = dpr;
     // taille d'une case à l'écran (pixels réels) : une douzaine de cases sur le petit côté
     this.tilePx = Math.max(28 * dpr, Math.min(w, h) / 11);
+    // une petite carte (intérieur) occupe toute la largeur de l'écran plutôt que de flotter au milieu
+    if (this.zone) this.tilePx = Math.max(this.tilePx, Math.min(w / this.width, h / this.height, this.tilePx * 1.7));
   }
 
   setZone(zone, me, peers) {
     this.zone = zone;
     this.map = renderZone(zone);
     this.th = theme(zone.theme);
+    this.resize();
     this.special = [];
     zone.rows.forEach((row, y) => { for (let x = 0; x < row.length; x++) if (row[x] === '"' || row[x] === '~') this.special.push([x, y, row[x]]); });
     this.motes = Array.from({ length: 26 }, (_, i) => ({ x: hash(i, 3), y: hash(7, i), s: 0.5 + hash(i, i) }));
