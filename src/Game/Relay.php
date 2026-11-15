@@ -150,8 +150,9 @@ final class Relay
         $x = $msg['x'] ?? null;
         $y = $msg['y'] ?? null;
         $d = $msg['d'] ?? 'd';
-        if (!is_string($place) || preg_match('/^[a-z0-9]{1,8}$/', $place) !== 1 || !is_int($x) || !is_int($y)
-            || abs($x) > 100000 || abs($y) > 100000 || !in_array($d, ['u', 'd', 'l', 'r'], true)) {
+        $valid = is_string($place) && preg_match('/^[a-z0-9]{1,8}$/', $place) === 1 && is_int($x) && is_int($y)
+            && abs($x) <= 100000 && abs($y) <= 100000 && in_array($d, ['u', 'd', 'l', 'r'], true);
+        if (!$valid) {
             return null;
         }
 
