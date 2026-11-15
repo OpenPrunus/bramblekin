@@ -5,3 +5,5 @@ parameters:
         - server
         - web/api.php
         - web/save.php
+        - web/online.php
+        - web/chat.php

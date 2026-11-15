@@ -1331,6 +1331,184 @@ $('save-restore').addEventListener('click', () => {
   location.reload();
 });
 
+// --- joueurs en ligne et chat (général + messages privés) -------------------------------------------------------------
+const NAME_KEY = 'bramblekin.name';
+let myName = '';
+try { myName = localStorage.getItem(NAME_KEY) ?? ''; } catch { /* ignoré */ }
+let myId = '';
+let players = [];
+const muted = new Set((() => { try { return JSON.parse(localStorage.getItem('bramblekin.blocked') ?? '[]'); } catch { return []; } })());
+const chat = { since: 0, messages: [], tab: 'all', unread: { all: 0 }, names: {} };
+const fmtTime = (s) => new Date(s * 1000).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+async function presence() {
+  try {
+    const r = await fetch('online.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: token(), name: myName }) });
+    if (!r.ok) return;
+    const d = await r.json();
+    myId = d.me ?? myId;
+    players = (d.players ?? []).filter((p) => p.id !== myId);
+    for (const p of d.players ?? []) chat.names[p.id] = p.name;
+    $('online-n').textContent = d.online === 1 ? '1 en ligne' : `${d.online} en ligne`;
+    if (!$('chat').hidden) renderPeople();
+  } catch { $('online-n').textContent = 'hors ligne'; }
+}
+presence();
+setInterval(() => { if (!document.hidden) presence(); }, 25000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { presence(); pollChat(); } });
+
+const convOf = (m) => (m.to === null ? 'all' : m.from === myId ? m.to : m.from);
+async function pollChat() {
+  try {
+    const r = await fetch(`chat.php?token=${encodeURIComponent(token())}&since=${chat.since}`, { cache: 'no-store' });
+    if (!r.ok) return;
+    const d = await r.json();
+    myId = d.me ?? myId;
+    for (const m of d.messages ?? []) {
+      chat.since = Math.max(chat.since, m.id);
+      chat.messages.push(m);
+      chat.names[m.from] = m.name;
+      if (muted.has(m.from) || m.from === myId) continue;
+      const c = convOf(m);
+      const open = !$('chat').hidden && chat.tab === c;
+      if (!open && chat.loaded) chat.unread[c] = (chat.unread[c] ?? 0) + 1;
+    }
+    chat.messages = chat.messages.slice(-400);
+    chat.loaded = true;
+    updateUnread();
+    if (!$('chat').hidden) renderChat();
+  } catch { /* hors ligne */ }
+}
+let chatTimer = null;
+function scheduleChat() {
+  clearTimeout(chatTimer);
+  chatTimer = setTimeout(async () => { if (!document.hidden) await pollChat(); scheduleChat(); }, $('chat').hidden ? 10000 : 3000);
+}
+pollChat(); scheduleChat();
+
+function updateUnread() {
+  const n = Object.values(chat.unread).reduce((a, b) => a + b, 0);
+  $('chat-unread').hidden = n === 0;
+  $('chat-unread').textContent = n > 99 ? '99+' : String(n);
+}
+
+function el(tag, attrs = {}, text = '') {
+  const e = document.createElement(tag);
+  Object.assign(e, attrs);
+  if (text) e.textContent = text;
+  return e;
+}
+
+function renderTabs() {
+  const tabs = $('chat-tabs');
+  tabs.innerHTML = '';
+  const convs = ['all', ...new Set(chat.messages.filter((m) => m.to !== null && !muted.has(convOf(m))).map(convOf))];
+  if (chat.tab !== 'all' && !convs.includes(chat.tab)) convs.push(chat.tab);
+  for (const c of convs) {
+    const b = el('button', { type: 'button', className: c === chat.tab ? 'on' : '' }, c === 'all' ? 'Général' : `✉️ ${chat.names[c] ?? '…'}`);
+    if (chat.unread[c]) b.append(el('span', { className: 'badge' }, String(chat.unread[c])));
+    b.addEventListener('click', () => openConv(c));
+    tabs.append(b);
+  }
+}
+
+function renderChat() {
+  renderTabs();
+  const list = $('chat-list');
+  const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+  list.innerHTML = '';
+  const shown = chat.messages.filter((m) => convOf(m) === chat.tab && !muted.has(m.from));
+  if (!shown.length) list.append(el('p', { className: 'chat-empty' }, chat.tab === 'all' ? 'Aucun message pour l\'instant. Dis bonjour !' : 'Début de votre conversation privée.'));
+  for (const m of shown) {
+    const row = el('div', { className: `msg${m.from === myId ? ' mine' : ''}` });
+    const who = el('span', { className: 'who', title: m.from === myId ? '' : 'Écrire en privé' }, m.name);
+    if (m.from !== myId) who.addEventListener('click', () => openConv(m.from, m.name));
+    row.append(who, document.createTextNode(m.text), el('time', {}, fmtTime(m.at)));
+    list.append(row);
+  }
+  if (atBottom || chat.stick) { list.scrollTop = list.scrollHeight; chat.stick = false; }
+  renderPeople();
+}
+
+function renderPeople() {
+  const box = $('chat-people');
+  box.innerHTML = '';
+  if (chat.tab !== 'all') {
+    const other = chat.tab;
+    const row = el('div', { className: 'p' });
+    row.append(el('span', {}, `Conversation privée avec ${chat.names[other] ?? '…'}`));
+    const hide = el('button', { type: 'button' }, muted.has(other) ? 'Réafficher' : '🚫 Masquer');
+    hide.addEventListener('click', () => {
+      if (muted.has(other)) muted.delete(other); else muted.add(other);
+      try { localStorage.setItem('bramblekin.blocked', JSON.stringify([...muted])); } catch { /* ignoré */ }
+      if (muted.has(other)) chat.tab = 'all';
+      renderChat();
+    });
+    row.append(hide);
+    box.append(row);
+    return;
+  }
+  box.append(el('h4', {}, players.length ? `En ligne (${players.length + 1}) :` : 'Personne d\'autre en ligne avec un pseudo pour l\'instant.'));
+  for (const p of players) {
+    if (muted.has(p.id)) continue;
+    const row = el('div', { className: 'p' });
+    row.append(el('span', {}, p.name));
+    const dm = el('button', { type: 'button', title: `Écrire à ${p.name} en privé` }, '✉️ Message privé');
+    dm.addEventListener('click', () => openConv(p.id, p.name));
+    row.append(dm);
+    box.append(row);
+  }
+}
+
+function openConv(c, name) {
+  if (name) chat.names[c] = name;
+  chat.tab = c;
+  chat.unread[c] = 0;
+  chat.stick = true;
+  updateUnread();
+  renderChat();
+  $('chat-input').placeholder = c === 'all' ? 'Écris à tout le monde…' : `Message privé à ${chat.names[c] ?? '…'}…`;
+  $('chat-input').focus({ preventScroll: true });
+}
+
+function openChat() {
+  $('chat').hidden = false;
+  $('chat-name').hidden = myName.length >= 2;
+  held.length = 0;
+  openConv(chat.tab);
+  pollChat(); scheduleChat();
+}
+$('btn-chat').addEventListener('click', () => ($('chat').hidden ? openChat() : ($('chat').hidden = true)));
+$('btn-online').addEventListener('click', () => { chat.tab = 'all'; openChat(); });
+$('chat-close').addEventListener('click', () => { $('chat').hidden = true; scheduleChat(); });
+$('chat-name-ok').addEventListener('click', () => {
+  const n = $('chat-name-input').value.replace(/[^\p{L}\p{N} _\-.]/gu, '').trim().slice(0, 15);
+  if (n.length < 2) { $('chat-note').textContent = 'Le pseudo doit faire au moins 2 caractères.'; return; }
+  myName = n;
+  try { localStorage.setItem(NAME_KEY, n); } catch { /* ignoré */ }
+  $('chat-name').hidden = true;
+  $('chat-note').textContent = '';
+  presence();
+  $('chat-input').focus();
+});
+$('chat-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = $('chat-input').value.trim();
+  if (!text) return;
+  if (myName.length < 2) { $('chat-name').hidden = false; $('chat-name-input').focus(); return; }
+  const body = { token: token(), name: myName, text };
+  if (chat.tab !== 'all') body.to = chat.tab;
+  try {
+    const r = await fetch('chat.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { $('chat-note').textContent = d.error === 'slow' ? 'Doucement : un message toutes les 2 secondes.' : 'Message refusé.'; return; }
+    $('chat-input').value = '';
+    $('chat-note').textContent = '';
+    chat.stick = true;
+    pollChat();
+  } catch { $('chat-note').textContent = 'Pas de réseau : message non envoyé.'; }
+});
+
 const where = await loadSave();
 const start = chunkOf('t1');
 if (where && !where.inside && Number.isInteger(where.x) && Number.isInteger(where.y) && WALK_OUT.has(tileAt(where.x, where.y))) place(where.x, where.y, where.d ?? 'u');
@@ -1338,4 +1516,4 @@ else place(15 + start.x0, 13 + start.z0);
 updateOutdoor();
 if (where?.inside && zones[where.inside]) goInside(where.inside, where.x, where.y);
 requestAnimationFrame(frame);
-window.__demo = { save, snapshot, party, bag, renderer, MOBILE, me, place, goInside, people, chunkOf, updateOutdoor, get event() { return event; } };
+window.__demo = { chat, openChat, presence, pollChat, get players() { return players; }, save, snapshot, party, bag, renderer, MOBILE, me, place, goInside, people, chunkOf, updateOutdoor, get event() { return event; } };

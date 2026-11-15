@@ -29,6 +29,31 @@
     #save-panel button { border: none; border-radius: 999px; padding: 10px 16px; min-height: 44px; font-weight: 700; background: #f1f3f8; cursor: pointer; }
     #save-panel button.primary { background: linear-gradient(180deg, #2fc38a, #1f9d6b); color: #fff; }
     #save-state { color: #1f9d6b; font-weight: 700; min-height: 1.2em; }
+    #chat-unread { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 999px; background: #ff4d6d; color: #fff; font-size: 12px; line-height: 18px; text-align: center; }
+    #chat { position: fixed; top: 0; right: 0; bottom: 0; width: min(400px, 100%); background: #f5f6fa; box-shadow: -10px 0 30px rgba(0,0,0,.25); z-index: 15; display: flex; flex-direction: column; color: #2b2a3a; padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) 0; }
+    #chat header { display: flex; gap: 6px; align-items: center; padding: 10px; background: #fff; border-bottom: 1px solid #e2e5ee; }
+    #chat-tabs { display: flex; gap: 6px; overflow-x: auto; flex: 1; scrollbar-width: none; }
+    #chat-tabs button, #chat-close, #chat-form button, .chat-people button, #chat-name button { border: none; border-radius: 999px; padding: 8px 14px; min-height: 40px; font-weight: 700; background: #eef0f6; cursor: pointer; white-space: nowrap; color: #2b2a3a; }
+    #chat-tabs button.on { background: #2b2a3a; color: #fff; }
+    #chat-tabs .badge { background: #ff4d6d; color: #fff; border-radius: 999px; padding: 0 6px; margin-left: 4px; font-size: 12px; }
+    #chat-close { width: 40px; padding: 0; flex: none; }
+    #chat-list { flex: 1; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+    .msg { background: #fff; border-radius: 14px; padding: 7px 11px; box-shadow: 0 1px 3px rgba(0,0,0,.07); max-width: 88%; overflow-wrap: anywhere; }
+    .msg.mine { align-self: flex-end; background: #e3f7ec; }
+    .msg .who { font-weight: 800; font-size: 13px; margin-right: 6px; cursor: pointer; }
+    .msg time { color: #8a8fa3; font-size: 11px; margin-left: 6px; }
+    .chat-empty { color: #8a8fa3; text-align: center; margin: 20px 0; }
+    .chat-people { padding: 8px 12px; border-top: 1px solid #e2e5ee; max-height: 30%; overflow-y: auto; background: #fff; }
+    .chat-people h4 { margin: 2px 0 6px; font-size: 13px; color: #6b6e80; }
+    .chat-people .p { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
+    .chat-people .p span { flex: 1; font-weight: 700; }
+    .chat-people .p button { padding: 4px 10px; min-height: 36px; }
+    #chat-form { display: flex; gap: 6px; padding: 10px; background: #fff; border-top: 1px solid #e2e5ee; }
+    #chat-form input, #chat-name input { flex: 1; min-width: 0; border: 1px solid #e2e5ee; border-radius: 999px; padding: 10px 14px; font: inherit; }
+    #chat-form button { background: linear-gradient(180deg, #2fc38a, #1f9d6b); color: #fff; }
+    #chat-name { padding: 12px; background: #fff7e0; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    #chat-name p { margin: 0; width: 100%; font-size: 14px; }
+    #chat-note { color: #c0392b; font-size: 13px; padding: 0 12px 6px; min-height: 0; }
     .pad { position: fixed; left: 14px; bottom: 14px; display: grid; grid-template: repeat(3, 54px) / repeat(3, 54px); }
     .pad button { border: none; border-radius: 16px; background: rgba(255,255,255,.85); box-shadow: 0 3px 10px rgba(0,0,0,.2); font-size: 20px; touch-action: none; }
     .pad [data-d="u"] { grid-area: 1 / 2; } .pad [data-d="l"] { grid-area: 2 / 1; } .pad [data-d="r"] { grid-area: 2 / 3; } .pad [data-d="d"] { grid-area: 3 / 2; }
@@ -65,11 +90,19 @@
   </style>
 </head>
 <body>
-  <div class="hud"><span class="pill" id="zone"></span><a class="pill back" href="https://games.prunus.dev">← Tous les jeux</a><button class="pill savebtn" id="btn-save" title="Sauvegarde" aria-label="Sauvegarde">💾</button><span class="pill" id="perf">Bramblekin</span></div>
+  <div class="hud"><span class="pill" id="zone"></span><a class="pill back" href="https://games.prunus.dev">← Tous les jeux</a><button class="pill savebtn" id="btn-online" title="Joueurs en ligne" aria-label="Joueurs en ligne">👥 <span id="online-n">…</span></button><button class="pill savebtn" id="btn-chat" title="Chat" aria-label="Chat">💬<span id="chat-unread" hidden></span></button><button class="pill savebtn" id="btn-save" title="Sauvegarde" aria-label="Sauvegarde">💾</button><span class="pill" id="perf">Bramblekin</span></div>
   <div id="banner"></div>
   <div id="fade"></div>
   <div id="duel" hidden><div class="vs">⚔ Combat !</div><div class="who"></div><div>« Hé, toi ! Nos regards se sont croisés : combat ! »</div><small class="team"></small><br><small>(Touche ou appuie sur une touche : le combat commence.)</small></div>
   <div id="say" hidden><p></p></div>
+  <div id="chat" hidden>
+    <header><nav id="chat-tabs"></nav><button id="chat-close" aria-label="Fermer">✕</button></header>
+    <div id="chat-list" aria-live="polite"></div>
+    <div class="chat-people" id="chat-people"></div>
+    <div id="chat-name" hidden><p>Choisis un pseudo pour discuter (2 à 15 caractères) :</p><input id="chat-name-input" maxlength="15" autocomplete="nickname"><button id="chat-name-ok">OK</button></div>
+    <div id="chat-note"></div>
+    <form id="chat-form"><input id="chat-input" maxlength="200" autocomplete="off" placeholder="Écris un message…" aria-label="Message"><button type="submit">Envoyer</button></form>
+  </div>
   <div id="save-panel" hidden><div class="box">
     <h3>💾 Sauvegarde</h3>
     <p>Ta partie est sauvegardée automatiquement (position, équipe, sac, dresseurs battus, objets ramassés).</p>
