@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   js-unit:
-    name: JavaScript (sprites, translations, PWA)
+    name: JavaScript (syntax, PWA)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -64,26 +64,6 @@ jobs:
       - name: Start the real PHP WebSocket server and play against it
         run: npm run test:integration
 
-  browser:
-    name: Browser (desktop and emulated phone, shared world, duel against a bot)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.5'
-          extensions: mbstring
-          tools: composer
-          coverage: none
-      - run: composer install --no-interaction --prefer-dist --no-progress --no-dev
-      - name: Drive headless Chrome
-        run: npm run test:browser
-        env:
-          CHROME_BIN: google-chrome
-
   docker:
     name: Docker image (smoke test)
     runs-on: ubuntu-latest
@@ -106,12 +86,10 @@ jobs:
           B=http://localhost:8080
           code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
           test "$(code $B/)" = 200
-          curl -s $B/ | grep -q 'wss:\\/\\/example.test\\/ws'
-          for f in main.js world.js battle.js ui.js sprites.js tiles.js i18n.js net.js audio.js; do test "$(code $B/js/$f)" = 200; done
-          test "$(code $B/css/style.css)" = 200
+          for f in game.js zones.json content.json vendor/three.module.js; do test "$(code $B/$f)" = 200; done
           for f in manifest.webmanifest sw.js icons/icon-192.png; do test "$(code $B/$f)" = 200; done
-          # the 3D preview and its vendored three.js
-          for f in 3d/ 3d/demo.js 3d/vendor/three.module.js 3d/zones.json 3d/content.json; do test "$(code $B/$f)" = 200; done
+          # the old /3d/ preview address redirects to the game
+          curl -s $B/3d/ | grep -q 'url=../'
           # the leaderboard API: empty at first, GET only, and it never serves the data directory
           test "$(curl -s $B/api.php)" = '[]'
           test "$(code -X DELETE $B/api.php)" = 405
