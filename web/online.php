@@ -1,16 +1,25 @@
 <?php
 
 // Joueurs en ligne : chaque navigateur ouvert sur le jeu se signale toutes les 25 secondes ; on compte ceux vus depuis 70 s.
-//   POST online.php {token, name?}   -> se signale, renvoie {"online": n, "players": [{id, name}], "me": id}
+//   POST online.php {token, name?}   -> se signale, renvoie {"online": n, "players": [{id, name}], "me": id, "nameTaken": bool}
 //   GET  online.php                  -> {"online": n}
 // On ne garde que l'identifiant public dérivé du code (jamais le code ni le hash qui nomme la sauvegarde), le pseudo et
 // l'heure du dernier signal, dans data/online.json.
 
 declare(strict_types=1);
 
+use Bramble\Api\Nicknames;
+
 ini_set('display_errors', '0');
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
+
+foreach ([(string) getenv('BRAMBLE_AUTOLOAD'), __DIR__ . '/../vendor/autoload.php', __DIR__ . '/vendor/autoload.php'] as $autoload) {
+    if ($autoload !== '' && is_file($autoload)) {
+        require $autoload;
+        break;
+    }
+}
 
 const WINDOW = 70;
 $dir = rtrim((string) (getenv('BRAMBLE_DATA_DIR') ?: __DIR__ . '/data'), '/');
@@ -38,6 +47,11 @@ if ($method === 'POST') {
     $name = mb_substr(trim((string) preg_replace('/[^\p{L}\p{N} _\-.]/u', '', $raw)), 0, 15);
 }
 $now = time();
+// pseudo réservé : s'il appartient à quelqu'un d'autre, on se signale sans pseudo et on prévient le navigateur
+$nameTaken = $me !== null && $name !== '' && !(new Nicknames($dir . '/names.json'))->claim($name, $me, $now);
+if ($nameTaken) {
+    $name = '';
+}
 $fh = @fopen($dir . '/online.json', 'c+');
 if ($fh === false) {
     echo '{"online":0}';
@@ -59,6 +73,7 @@ fclose($fh);
 $out = ['online' => count($seen)];
 if ($me !== null) {
     $out['me'] = $me;
+    $out['nameTaken'] = $nameTaken;
     $out['players'] = [];
     foreach ($seen as $id => $p) {
         if (($p['name'] ?? '') !== '') {

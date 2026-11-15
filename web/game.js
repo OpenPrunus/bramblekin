@@ -1392,6 +1392,13 @@ async function presence() {
     if (!r.ok) return;
     const d = await r.json();
     myId = d.me ?? myId;
+    if (d.nameTaken && myName) {
+      // ce pseudo appartient à quelqu'un d'autre : on en redemande un
+      $('chat-note').textContent = `Le pseudo « ${myName} » est déjà pris par un autre joueur. Choisis-en un autre.`;
+      myName = '';
+      try { localStorage.removeItem(NAME_KEY); } catch { /* ignoré */ }
+      $('chat-name').hidden = false;
+    }
     players = (d.players ?? []).filter((p) => p.id !== myId);
     for (const p of d.players ?? []) chat.names[p.id] = p.name;
     $('online-n').textContent = d.online === 1 ? '1 en ligne' : `${d.online} en ligne`;
@@ -1533,8 +1540,7 @@ $('chat-name-ok').addEventListener('click', () => {
   try { localStorage.setItem(NAME_KEY, n); } catch { /* ignoré */ }
   $('chat-name').hidden = true;
   $('chat-note').textContent = '';
-  presence();
-  $('chat-input').focus();
+  presence().then(() => { if (myName) { $('chat-note').textContent = `Pseudo « ${myName} » réservé pour toi ✔`; $('chat-input').focus(); } });
 });
 $('chat-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1546,6 +1552,14 @@ $('chat-form').addEventListener('submit', async (e) => {
   try {
     const r = await fetch('chat.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const d = await r.json().catch(() => ({}));
+    if (d.error === 'name_taken') {
+      $('chat-note').textContent = `Le pseudo « ${myName} » est déjà pris par un autre joueur. Choisis-en un autre.`;
+      myName = '';
+      try { localStorage.removeItem(NAME_KEY); } catch { /* ignoré */ }
+      $('chat-name').hidden = false;
+      $('chat-name-input').focus();
+      return;
+    }
     if (!r.ok) { $('chat-note').textContent = d.error === 'slow' ? 'Doucement : un message toutes les 2 secondes.' : 'Message refusé.'; return; }
     $('chat-input').value = '';
     $('chat-note').textContent = '';

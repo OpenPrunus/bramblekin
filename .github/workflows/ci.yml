@@ -120,6 +120,10 @@ jobs:
           ! curl -s "$B/chat.php?token=$T" | grep -q Psst
           curl -s "$B/chat.php?token=$T" | grep -q Salut
           test "$(code $B/data/chat.json)" = 403
+          # nicknames are reserved: Bob cannot post as Alice, nor show up as her in the player list
+          test "$(code -X POST -H 'Content-Type: application/json' -d '{"token":"'$V'","name":"alice","text":"Je suis Alice"}' $B/chat.php)" = 409
+          curl -s -X POST -H 'Content-Type: application/json' -d '{"token":"'$V'","name":"ALICE"}' $B/online.php | grep -q '"nameTaken":true'
+          test "$(code $B/data/names.json)" = 403
           # the old /3d/ preview address redirects to the game
           curl -s $B/3d/ | grep -q 'url=../'
           # the leaderboard API: empty at first, GET only, and it never serves the data directory

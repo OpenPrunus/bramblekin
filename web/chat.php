@@ -4,12 +4,22 @@
 //   POST chat.php {token, name, text, to?}   -> envoie (to = identifiant public du destinataire pour un message privé)
 //   GET  chat.php?token=…&since=n            -> messages plus récents que n : le général, et les privés qui me concernent
 // Messages de 200 caractères au plus, un toutes les 2 secondes par joueur ; on garde les 300 derniers (data/chat.json).
+// Les pseudos sont réservés (data/names.json) : 409 {"error":"name_taken"} si le pseudo appartient à un autre joueur.
 
 declare(strict_types=1);
+
+use Bramble\Api\Nicknames;
 
 ini_set('display_errors', '0');
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
+
+foreach ([(string) getenv('BRAMBLE_AUTOLOAD'), __DIR__ . '/../vendor/autoload.php', __DIR__ . '/vendor/autoload.php'] as $autoload) {
+    if ($autoload !== '' && is_file($autoload)) {
+        require $autoload;
+        break;
+    }
+}
 
 const KEEP = 300;
 const GAP = 2;
@@ -62,6 +72,7 @@ if ($method === 'POST') {
         mb_strlen($name) < 2 => 'name',
         $to === $me => 'self',
         ($last[$me] ?? 0) > $now - GAP => 'slow',
+        !(new Nicknames($dir . '/names.json'))->claim($name, $me, $now) => 'name_taken',
         default => null,
     };
     if ($error === null) {
@@ -77,7 +88,9 @@ if ($method === 'POST') {
     flock($fh, LOCK_UN);
     fclose($fh);
     if ($error !== null) {
-        http_response_code($error === 'slow' ? 429 : 400);
+        http_response_code(match ($error) {
+            'slow' => 429, 'name_taken' => 409, default => 400
+        });
         echo json_encode(['error' => $error], JSON_THROW_ON_ERROR);
 
         return;
