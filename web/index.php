@@ -28,6 +28,14 @@
     #save-panel .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
     #save-panel button { border: none; border-radius: 999px; padding: 10px 16px; min-height: 44px; font-weight: 700; background: #f1f3f8; cursor: pointer; }
     #save-panel button.primary { background: linear-gradient(180deg, #2fc38a, #1f9d6b); color: #fff; }
+    #pin-ask { position: fixed; inset: 0; background: rgba(20,20,40,.55); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 30; padding: 16px; }
+    #pin-ask .box { background: #fff; border-radius: 22px; padding: 20px; width: min(380px, 100%); color: #2b2a3a; box-shadow: 0 10px 30px rgba(0,0,0,.3); }
+    #pin-ask h3 { margin: 0 0 6px; }
+    #pin-ask input { width: 100%; box-sizing: border-box; border: 1px solid #e2e5ee; border-radius: 12px; padding: 12px; font: inherit; font-size: 20px; letter-spacing: 6px; text-align: center; }
+    #pin-ask .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    #pin-ask button { border: none; border-radius: 999px; padding: 10px 16px; min-height: 44px; font-weight: 700; background: #f1f3f8; cursor: pointer; }
+    #pin-ask button.primary { background: linear-gradient(180deg, #2fc38a, #1f9d6b); color: #fff; }
+    #pin-state { color: #6b6e80; font-size: 14px; }
     #save-state { color: #1f9d6b; font-weight: 700; min-height: 1.2em; }
     #chat-unread { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 999px; background: #ff4d6d; color: #fff; font-size: 12px; line-height: 18px; text-align: center; }
     #chat { position: fixed; top: 0; right: 0; bottom: 0; width: min(400px, 100%); background: #f5f6fa; box-shadow: -10px 0 30px rgba(0,0,0,.25); z-index: 15; display: flex; flex-direction: column; color: #2b2a3a; padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) 0; }
@@ -103,6 +111,12 @@
     <div id="chat-note"></div>
     <form id="chat-form"><input id="chat-input" maxlength="200" autocomplete="off" placeholder="Écris un message…" aria-label="Message"><button type="submit">Envoyer</button></form>
   </div>
+  <div id="pin-ask" class="modal" hidden><div class="box">
+    <h3>🔒 Code PIN</h3>
+    <p></p>
+    <input inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="Code PIN">
+    <div class="row"><button class="ok primary">Valider</button><button class="skip">Jouer sans cette partie</button></div>
+  </div></div>
   <div id="save-panel" hidden><div class="box">
     <h3>💾 Sauvegarde</h3>
     <p>Ta partie est sauvegardée automatiquement (position, équipe, sac, dresseurs battus, objets ramassés).</p>
@@ -110,6 +124,10 @@
     <p><small>Ton code de sauvegarde, pour reprendre sur un autre appareil (garde-le pour toi) :</small></p>
     <code id="save-code"></code>
     <div class="row"><button id="save-copy">Copier le code</button><button id="save-now" class="primary">Sauvegarder maintenant</button></div>
+    <p><small>Code PIN (4 à 6 chiffres) : il sera demandé pour reprendre ta partie sur un autre appareil.</small></p>
+    <input id="pin-input" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" placeholder="Nouveau code PIN">
+    <div class="row"><button id="pin-set">Protéger / changer le PIN</button><button id="pin-remove">Retirer le PIN</button></div>
+    <p id="pin-state" class="muted"></p>
     <p><small>Reprendre une partie avec un code :</small></p>
     <input id="save-input" autocomplete="off" spellcheck="false" maxlength="128" placeholder="Colle ton code ici">
     <div class="row"><button id="save-restore">Reprendre cette partie</button><button id="save-close">Fermer</button></div>

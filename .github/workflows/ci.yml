@@ -96,6 +96,16 @@ jobs:
           test "$(code "$B/save.php?token=bad")" = 400
           test "$(code -X DELETE $B/save.php)" = 405
           test "$(code $B/data/saves/)" = 403
+          # a PIN protects a save: without it, the save can be neither read nor overwritten; 5 wrong PINs lock it
+          W=defghijklmnopqrstuvwxyz012345678
+          curl -s -X POST -H 'Content-Type: application/json' -d '{"token":"'$W'","state":{"v":1,"bag":{"Orbe":3}}}' $B/save.php | grep -q savedAt
+          curl -s -X POST -H 'Content-Type: application/json' -d '{"token":"'$W'","newPin":"2468"}' $B/save.php | grep -q '"pin":true'
+          test "$(code "$B/save.php?token=$W")" = 401
+          curl -s "$B/save.php?token=$W&pin=2468" | grep -q '"Orbe":3'
+          test "$(code -X POST -H 'Content-Type: application/json' -d '{"token":"'$W'","state":{"v":1}}' $B/save.php)" = 401
+          for i in 1 2 3 4; do test "$(code "$B/save.php?token=$W&pin=1111")" = 401; done
+          test "$(code "$B/save.php?token=$W&pin=1111")" = 423
+          test "$(code "$B/save.php?token=$W&pin=2468")" = 423
           # players online and chat: a ping counts the player, a general message is seen by all, a private one only by its recipient
           U=bcdefghijklmnopqrstuvwxyz0123456
           V=cdefghijklmnopqrstuvwxyz01234567

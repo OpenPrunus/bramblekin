@@ -1259,6 +1259,9 @@ function token() {
 }
 let dirty = false;
 let lastSave = 0;
+const PIN_KEY = 'bramblekin.pin';
+const pinOf = () => { try { return localStorage.getItem(PIN_KEY) ?? ''; } catch { return ''; } };
+let serverBlocked = false;     // partie protégée par un PIN qu'on n'a pas : on ne touche pas à la sauvegarde du serveur
 function changed() { dirty = true; }
 function snapshot() {
   return {
@@ -1274,10 +1277,11 @@ function save(beacon = false) {
   dirty = false;
   lastSave = performance.now();
   try { localStorage.setItem('bramblekin.save', JSON.stringify(state)); } catch { /* ignoré */ }
-  const body = JSON.stringify({ token: token(), state });
+  if (serverBlocked) { $('save-state').textContent = 'Partie gardée sur cet appareil seulement (code PIN manquant).'; return; }
+  const body = JSON.stringify({ token: token(), pin: pinOf(), state });
   if (beacon && navigator.sendBeacon) { navigator.sendBeacon('save.php', new Blob([body], { type: 'application/json' })); return; }
   fetch('save.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true })
-    .then((r) => { $('save-state').textContent = r.ok ? 'Partie sauvegardée ✔' : 'Sauvegarde sur le serveur impossible (copie locale gardée)'; })
+    .then((r) => { $('save-state').textContent = r.ok ? 'Partie sauvegardée ✔' : r.status === 401 || r.status === 423 ? 'Code PIN requis : partie gardée sur cet appareil seulement.' : 'Sauvegarde sur le serveur impossible (copie locale gardée)'; })
     .catch(() => { $('save-state').textContent = 'Hors ligne : partie gardée sur cet appareil'; });
 }
 setInterval(() => { if (dirty && performance.now() - lastSave > 6000) save(); }, 2000);
@@ -1288,10 +1292,20 @@ async function loadSave() {
   let local = null;
   try { local = JSON.parse(localStorage.getItem('bramblekin.save') ?? 'null'); } catch { /* ignoré */ }
   let remote = null;
-  try {
-    const r = await fetch(`save.php?token=${encodeURIComponent(token())}`, { cache: 'no-store' });
-    if (r.ok) remote = await r.json();
-  } catch { /* hors ligne : on garde la copie locale */ }
+  for (let attempt = 0; attempt < 6; attempt++) {
+    let r;
+    try {
+      r = await fetch(`save.php?token=${encodeURIComponent(token())}&pin=${encodeURIComponent(pinOf())}`, { cache: 'no-store' });
+    } catch { break; }                                              // hors ligne : on garde la copie locale
+    if (r.ok) { remote = await r.json(); break; }
+    const err = await r.json().catch(() => ({}));
+    if (r.status === 423) { await askPin(`Trop d'essais : cette partie est bloquée encore ${Math.ceil((err.retry ?? 900) / 60)} min.`, true); serverBlocked = true; break; }
+    if (r.status !== 401) break;
+    const pin = await askPin(attempt === 0 ? 'Cette partie est protégée par un code PIN.' : `Code PIN incorrect (encore ${err.left ?? '?'} essai(s)).`);
+    if (pin === null) { serverBlocked = true; break; }
+    try { localStorage.setItem(PIN_KEY, pin); } catch { /* ignoré */ }
+  }
+  if (serverBlocked) local = null;                                  // on ne mélange pas une partie protégée avec une copie locale
   const best = [local, remote].filter((x) => x && x.v === 1).sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0))[0];
   if (!best) return null;
   party.length = 0;
@@ -1315,10 +1329,41 @@ async function loadSave() {
   return best.where ?? null;
 }
 
+/** Demande le code PIN d'une partie protégée ; renvoie le PIN saisi, ou null pour jouer sans cette partie. */
+function askPin(message, infoOnly = false) {
+  return new Promise((resolve) => {
+    const box = $('pin-ask');
+    box.querySelector('p').textContent = message;
+    box.querySelector('input').hidden = infoOnly;
+    box.querySelector('.ok').hidden = infoOnly;
+    box.querySelector('input').value = '';
+    box.hidden = false;
+    if (!infoOnly) box.querySelector('input').focus();
+    const done = (v) => { box.hidden = true; box.querySelector('.ok').onclick = null; box.querySelector('.skip').onclick = null; resolve(v); };
+    box.querySelector('.ok').onclick = () => { const v = box.querySelector('input').value.trim(); if (/^\d{4,6}$/.test(v)) done(v); };
+    box.querySelector('.skip').onclick = () => done(null);
+    box.querySelector('input').onkeydown = (e) => { if (e.key === 'Enter') box.querySelector('.ok').click(); };
+  });
+}
+
+async function setPin(newPin) {
+  try {
+    const r = await fetch('save.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: token(), pin: pinOf(), newPin }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { $('pin-state').textContent = d.error === 'format' ? 'Le PIN doit faire 4 à 6 chiffres.' : 'Impossible de changer le PIN (PIN actuel incorrect ?).'; return; }
+    try { if (newPin) localStorage.setItem(PIN_KEY, newPin); else localStorage.removeItem(PIN_KEY); } catch { /* ignoré */ }
+    $('pin-state').textContent = newPin ? 'Partie protégée par ton code PIN ✔ (retiens-le !)' : 'Code PIN retiré.';
+    $('pin-input').value = '';
+  } catch { $('pin-state').textContent = 'Pas de réseau.'; }
+}
+$('pin-set').addEventListener('click', () => setPin($('pin-input').value.trim()));
+$('pin-remove').addEventListener('click', () => setPin(''));
+
 // panneau 💾 : code de sauvegarde, reprise sur un autre appareil
 $('btn-save').addEventListener('click', () => {
   $('save-panel').hidden = false;
   $('save-code').textContent = token();
+  $('pin-state').textContent = pinOf() ? 'Ta partie est protégée par un code PIN.' : 'Pas encore de code PIN.';
   busy = true;
 });
 $('save-close').addEventListener('click', () => { $('save-panel').hidden = true; busy = !!battle || !!event; });
@@ -1327,7 +1372,7 @@ $('save-copy').addEventListener('click', async () => { try { await navigator.cli
 $('save-restore').addEventListener('click', () => {
   const code = $('save-input').value.trim();
   if (!/^[A-Za-z0-9_-]{24,128}$/.test(code)) { $('save-state').textContent = 'Ce code n\'est pas valable.'; return; }
-  try { localStorage.setItem(TOKEN_KEY, code); localStorage.removeItem('bramblekin.save'); } catch { /* ignoré */ }
+  try { localStorage.setItem(TOKEN_KEY, code); localStorage.removeItem('bramblekin.save'); localStorage.removeItem(PIN_KEY); } catch { /* ignoré */ }
   location.reload();
 });
 

@@ -45,7 +45,8 @@ the same 60 maps in real 3D, one seamless world with no loading between towns an
 up to battle, 3D battles, wild encounters, an action key to pick up items and talk, and quality profiles for phones and
 computers (frame-rate cap, adaptive resolution, shadows updated only when something moves). It runs in the browser and saves
 automatically: `web/save.php` keeps each game under the SHA-256 hash of a secret code held by the browser (shown in the
-💾 panel to resume on another device), with a local copy as fallback. The HUD shows how many players are online (`web/online.php`,
+💾 panel to resume on another device), with a local copy as fallback. An optional 4–6 digit PIN (stored as a
+`password_hash`) is then required to read or overwrite the save; 5 wrong PINs lock it for 15 minutes. The HUD shows how many players are online (`web/online.php`,
 a ping every 25 s) and opens a chat: a general channel and private messages (`web/chat.php`, 200 characters, one
 message every 2 s, the last 300 kept, players identified only by a public id derived from their code). Players do not
 see each other in the world yet. `php tools/export-3d.php` regenerates
