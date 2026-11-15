@@ -373,6 +373,8 @@ function tileAt(wx, wz) {
 
 /** Tous les personnages du monde, en coordonnées du monde (les dresseurs peuvent se déplacer). */
 const people = [];
+const picked = new Set();      // objets déjà ramassés (identifiants)
+const beatenIds = new Set();   // dresseurs déjà battus
 for (const c of CHAIN) for (const n of c.zone.npcs) {
   if (n.kind === 'guard') continue;
   people.push({ ...n, wx: n.x + c.x0, wz: n.y + c.z0, chunk: c.id, beaten: false, model: null });
@@ -632,7 +634,7 @@ function buildInterior(z) {
     if (ch === 'm') { const rug = add(new THREE.BoxGeometry(0.9, 0.02, 0.8), mat(0xc0475e), x + 0.5, 0.01, y + 0.5); rug.castShadow = false; }
     if (ch === 'r') { add(new THREE.CylinderGeometry(0.25, 0.3, 1.8, 20), mat(0xeeeae0, { roughness: 0.4 }), x + 0.5, 0.9, y + 0.5); add(new THREE.SphereGeometry(0.2, 16, 12), mat(0xd4af37, { metalness: 0.8, roughness: 0.3 }), x + 0.5, 1.95, y + 0.5); }
   } });
-  insidePeople = z.npcs.filter((n) => n.kind !== 'guard').map((n) => ({ ...n, wx: n.x, wz: n.y, beaten: false, model: null }));
+  insidePeople = z.npcs.filter((n) => n.kind !== 'guard' && !picked.has(n.id)).map((n) => ({ ...n, wx: n.x, wz: n.y, beaten: beatenIds.has(n.id), model: null }));
   for (const p of insidePeople) { const m = personModel(p); if (!m) continue; m.position.set(p.wx + 0.5, m.position.y, p.wz + 0.5); interiorRoot.add(m); p.model = m; }
   target = null;
 }
@@ -757,7 +759,7 @@ function arrive() {
     if (pick) {
       held.length = 0;
       busy = true;
-      startBattle({ kind: 'wild', team: [makeKin(pick[0], pick[1] + Math.floor(Math.random() * (pick[2] - pick[1] + 1)))], onEnd: () => { busy = false; } });
+      startBattle({ kind: 'wild', team: [makeKin(pick[0], pick[1] + Math.floor(Math.random() * (pick[2] - pick[1] + 1)))], onEnd: () => { busy = false; changed(); } });
     }
   }
 }
@@ -850,7 +852,7 @@ function endDuel() {
   startBattle({
     kind: 'trainer', name: `${CLS[p.cls] ?? 'Dresseur'} ${p.name ?? ''}`,
     team: (p.team ?? []).map(([sp, lv]) => makeKin(sp, lv)),
-    onEnd: (won) => { p.beaten = won; busy = false; },
+    onEnd: (won) => { p.beaten = won; if (won) beatenIds.add(p.id); busy = false; changed(); },
   });
 }
 
@@ -1109,6 +1111,7 @@ function battleFrame(dt) {
 // --- commandes ----------------------------------------------------------------------------------------------------
 const KEYS = { ArrowUp: 'u', ArrowDown: 'd', ArrowLeft: 'l', ArrowRight: 'r', KeyW: 'u', KeyS: 'd', KeyA: 'l', KeyD: 'r', KeyZ: 'u', KeyQ: 'l' };
 window.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement) return;     // on tape un code de sauvegarde
   const d = KEYS[e.code];
   if (battle) return;
   if (!$('say').hidden) { closeSay(); return; }
@@ -1142,16 +1145,18 @@ function interact() {
     p.model?.parent?.remove(p.model);
     const list = inside ? insidePeople : people;
     list.splice(list.indexOf(p), 1);
+    picked.add(p.id);
     bag[p.item] = (bag[p.item] ?? 0) + 1;
+    changed();
     shadowDirty = true;
     say(`Tu trouves : ${p.item ?? 'un objet'} ! (Sac : ${Object.entries(bag).map(([k, n]) => `${k} ×${n}`).join(', ')})`);
     return;
   }
-  if (p.kind === 'nurse') { for (const k of party) k.hp = k.max; say('Infirmière : « Tes créatures sont en pleine forme ! »'); return; }
+  if (p.kind === 'nurse') { for (const k of party) k.hp = k.max; changed(); say('Infirmière : « Tes créatures sont en pleine forme ! »'); return; }
   if (p.kind === 'trainer' || p.kind === 'leader' || p.kind === 'champion') {
     if (p.beaten) { say(`${CLS[p.cls] ?? 'Dresseur'} ${p.name ?? ''} : « Bien joué. Je vais m\'entraîner encore ! »`); return; }
     busy = true;
-    startBattle({ kind: 'trainer', name: `${CLS[p.cls] ?? 'Dresseur'} ${p.name ?? ''}`, team: (p.team ?? []).map(([sp, lv]) => makeKin(sp, lv)), onEnd: (won) => { p.beaten = won; busy = false; } });
+    startBattle({ kind: 'trainer', name: `${CLS[p.cls] ?? 'Dresseur'} ${p.name ?? ''}`, team: (p.team ?? []).map(([sp, lv]) => makeKin(sp, lv)), onEnd: (won) => { p.beaten = won; if (won) beatenIds.add(p.id); busy = false; changed(); } });
     return;
   }
   say(LINES[p.kind] ?? LINES.talk);
@@ -1197,7 +1202,7 @@ function frame(now) {
   if (me.t < 1) {
     me.t = Math.min(1, me.t + dt / STEP);
     me.phase += dt * 16;
-    if (me.t === 1) arrive();
+    if (me.t === 1) { arrive(); changed(); }
   }
   const px = me.fromX + (me.x - me.fromX) * me.t + 0.5;
   const pz = me.fromY + (me.y - me.fromY) * me.t + 0.5;
@@ -1240,8 +1245,97 @@ function frame(now) {
 function applyRatio() { renderer.setPixelRatio(ratio); resize(); shadowDirty = true; }
 
 interiorRoot.visible = false;
+// --- sauvegarde : automatique, sur le serveur (sous le hash d'un code secret gardé par le navigateur) et en local -------
+const TOKEN_KEY = 'bramblekin.token';
+function token() {
+  let tok = null;
+  try { tok = localStorage.getItem(TOKEN_KEY); } catch { /* stockage indisponible */ }
+  if (tok && /^[A-Za-z0-9_-]{24,128}$/.test(tok)) return tok;
+  const b = new Uint8Array(24);
+  crypto.getRandomValues(b);
+  tok = btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  try { localStorage.setItem(TOKEN_KEY, tok); } catch { /* ignoré */ }
+  return tok;
+}
+let dirty = false;
+let lastSave = 0;
+function changed() { dirty = true; }
+function snapshot() {
+  return {
+    v: 1, savedAt: Date.now(),
+    where: inside ? { inside: inside.id, x: me.x, y: me.y, d: me.d } : { x: me.x, y: me.y, d: me.d },
+    party: party.map((k) => ({ id: k.sp.id, lv: k.lv, hp: k.hp, xp: k.xp, moves: k.moves })),
+    bag, beaten: [...beatenIds], picked: [...picked],
+  };
+}
+function save(beacon = false) {
+  if (battle || busy && !beacon) return;
+  const state = snapshot();
+  dirty = false;
+  lastSave = performance.now();
+  try { localStorage.setItem('bramblekin.save', JSON.stringify(state)); } catch { /* ignoré */ }
+  const body = JSON.stringify({ token: token(), state });
+  if (beacon && navigator.sendBeacon) { navigator.sendBeacon('save.php', new Blob([body], { type: 'application/json' })); return; }
+  fetch('save.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true })
+    .then((r) => { $('save-state').textContent = r.ok ? 'Partie sauvegardée ✔' : 'Sauvegarde sur le serveur impossible (copie locale gardée)'; })
+    .catch(() => { $('save-state').textContent = 'Hors ligne : partie gardée sur cet appareil'; });
+}
+setInterval(() => { if (dirty && performance.now() - lastSave > 6000) save(); }, 2000);
+document.addEventListener('visibilitychange', () => { if (document.hidden && dirty) save(true); });
+window.addEventListener('pagehide', () => { if (dirty) save(true); });
+
+async function loadSave() {
+  let local = null;
+  try { local = JSON.parse(localStorage.getItem('bramblekin.save') ?? 'null'); } catch { /* ignoré */ }
+  let remote = null;
+  try {
+    const r = await fetch(`save.php?token=${encodeURIComponent(token())}`, { cache: 'no-store' });
+    if (r.ok) remote = await r.json();
+  } catch { /* hors ligne : on garde la copie locale */ }
+  const best = [local, remote].filter((x) => x && x.v === 1).sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0))[0];
+  if (!best) return null;
+  party.length = 0;
+  for (const k of best.party ?? []) {
+    if (!content.species[k.id - 1]) continue;
+    const kin = makeKin(k.id, k.lv);
+    kin.hp = Math.max(0, Math.min(kin.max, k.hp ?? kin.max));
+    kin.xp = k.xp ?? 0;
+    if (Array.isArray(k.moves) && k.moves.every((m) => content.moves[m])) kin.moves = k.moves.slice(0, 4);
+    party.push(kin);
+  }
+  if (!party.length) party.push(makeKin(4, 9));
+  Object.assign(bag, best.bag ?? {});
+  for (const id of best.beaten ?? []) beatenIds.add(id);
+  for (const id of best.picked ?? []) picked.add(id);
+  for (let i = people.length - 1; i >= 0; i--) {
+    const p = people[i];
+    if (picked.has(p.id)) people.splice(i, 1);
+    else if (beatenIds.has(p.id)) p.beaten = true;
+  }
+  return best.where ?? null;
+}
+
+// panneau 💾 : code de sauvegarde, reprise sur un autre appareil
+$('btn-save').addEventListener('click', () => {
+  $('save-panel').hidden = false;
+  $('save-code').textContent = token();
+  busy = true;
+});
+$('save-close').addEventListener('click', () => { $('save-panel').hidden = true; busy = !!battle || !!event; });
+$('save-now').addEventListener('click', () => { const b = busy; busy = false; save(); busy = b; });
+$('save-copy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(token()); $('save-copy').textContent = 'Copié ✔'; } catch { /* ignoré */ } });
+$('save-restore').addEventListener('click', () => {
+  const code = $('save-input').value.trim();
+  if (!/^[A-Za-z0-9_-]{24,128}$/.test(code)) { $('save-state').textContent = 'Ce code n\'est pas valable.'; return; }
+  try { localStorage.setItem(TOKEN_KEY, code); localStorage.removeItem('bramblekin.save'); } catch { /* ignoré */ }
+  location.reload();
+});
+
+const where = await loadSave();
 const start = chunkOf('t1');
-place(15 + start.x0, 13 + start.z0);
+if (where && !where.inside && Number.isInteger(where.x) && Number.isInteger(where.y) && WALK_OUT.has(tileAt(where.x, where.y))) place(where.x, where.y, where.d ?? 'u');
+else place(15 + start.x0, 13 + start.z0);
 updateOutdoor();
+if (where?.inside && zones[where.inside]) goInside(where.inside, where.x, where.y);
 requestAnimationFrame(frame);
-window.__demo = { renderer, MOBILE, me, place, goInside, people, chunkOf, updateOutdoor, get event() { return event; } };
+window.__demo = { save, snapshot, party, bag, renderer, MOBILE, me, place, goInside, people, chunkOf, updateOutdoor, get event() { return event; } };

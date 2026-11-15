@@ -4,3 +4,4 @@ parameters:
         - src
         - server
         - web/api.php
+        - web/save.php

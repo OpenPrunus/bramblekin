@@ -88,6 +88,14 @@ jobs:
           test "$(code $B/)" = 200
           for f in game.js zones.json content.json vendor/three.module.js; do test "$(code $B/$f)" = 200; done
           for f in manifest.webmanifest sw.js icons/icon-192.png; do test "$(code $B/$f)" = 200; done
+          # game saves: empty at first, then written and read back under the token's hash, never served directly
+          T=abcdefghijklmnopqrstuvwxyz012345
+          test "$(curl -s "$B/save.php?token=$T")" = '{}'
+          curl -s -X POST -H 'Content-Type: application/json' -d '{"token":"'$T'","state":{"v":1,"bag":{"Orbe":2}}}' $B/save.php | grep -q savedAt
+          curl -s "$B/save.php?token=$T" | grep -q '"Orbe":2'
+          test "$(code "$B/save.php?token=bad")" = 400
+          test "$(code -X DELETE $B/save.php)" = 405
+          test "$(code $B/data/saves/)" = 403
           # the old /3d/ preview address redirects to the game
           curl -s $B/3d/ | grep -q 'url=../'
           # the leaderboard API: empty at first, GET only, and it never serves the data directory

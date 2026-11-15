@@ -18,6 +18,16 @@
     .hud { position: fixed; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; gap: 8px; pointer-events: none; }
     .pill { background: rgba(255,255,255,.88); backdrop-filter: blur(8px); border-radius: 999px; padding: 6px 14px; box-shadow: 0 3px 12px rgba(0,0,0,.18); color: #2b2a3a; }
     .hud .back { pointer-events: auto; text-decoration: none; margin-right: auto; margin-left: 8px; }
+    .hud .savebtn { pointer-events: auto; border: none; cursor: pointer; font-size: 16px; margin-left: 8px; }
+    #save-panel { position: fixed; inset: 0; background: rgba(20,20,40,.45); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 20; padding: 16px; }
+    #save-panel .box { background: #fff; border-radius: 22px; padding: 20px; width: min(460px, 100%); box-shadow: 0 10px 30px rgba(0,0,0,.3); color: #2b2a3a; }
+    #save-panel h3 { margin: 0 0 8px; }
+    #save-panel code { display: block; word-break: break-all; background: #f1f3f8; border-radius: 12px; padding: 10px; margin: 8px 0; user-select: all; }
+    #save-panel input { width: 100%; box-sizing: border-box; border: 1px solid #e2e5ee; border-radius: 12px; padding: 10px; font: inherit; margin: 6px 0; }
+    #save-panel .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    #save-panel button { border: none; border-radius: 999px; padding: 10px 16px; min-height: 44px; font-weight: 700; background: #f1f3f8; cursor: pointer; }
+    #save-panel button.primary { background: linear-gradient(180deg, #2fc38a, #1f9d6b); color: #fff; }
+    #save-state { color: #1f9d6b; font-weight: 700; min-height: 1.2em; }
     .pad { position: fixed; left: 14px; bottom: 14px; display: grid; grid-template: repeat(3, 54px) / repeat(3, 54px); }
     .pad button { border: none; border-radius: 16px; background: rgba(255,255,255,.85); box-shadow: 0 3px 10px rgba(0,0,0,.2); font-size: 20px; touch-action: none; }
     .pad [data-d="u"] { grid-area: 1 / 2; } .pad [data-d="l"] { grid-area: 2 / 1; } .pad [data-d="r"] { grid-area: 2 / 3; } .pad [data-d="d"] { grid-area: 3 / 2; }
@@ -54,11 +64,22 @@
   </style>
 </head>
 <body>
-  <div class="hud"><span class="pill" id="zone"></span><a class="pill back" href="https://games.prunus.dev">← Tous les jeux</a><span class="pill" id="perf">Bramblekin</span></div>
+  <div class="hud"><span class="pill" id="zone"></span><a class="pill back" href="https://games.prunus.dev">← Tous les jeux</a><button class="pill savebtn" id="btn-save" title="Sauvegarde" aria-label="Sauvegarde">💾</button><span class="pill" id="perf">Bramblekin</span></div>
   <div id="banner"></div>
   <div id="fade"></div>
   <div id="duel" hidden><div class="vs">⚔ Combat !</div><div class="who"></div><div>« Hé, toi ! Nos regards se sont croisés : combat ! »</div><small class="team"></small><br><small>(Touche ou appuie sur une touche : le combat commence.)</small></div>
   <div id="say" hidden><p></p></div>
+  <div id="save-panel" hidden><div class="box">
+    <h3>💾 Sauvegarde</h3>
+    <p>Ta partie est sauvegardée automatiquement (position, équipe, sac, dresseurs battus, objets ramassés).</p>
+    <p id="save-state"></p>
+    <p><small>Ton code de sauvegarde, pour reprendre sur un autre appareil (garde-le pour toi) :</small></p>
+    <code id="save-code"></code>
+    <div class="row"><button id="save-copy">Copier le code</button><button id="save-now" class="primary">Sauvegarder maintenant</button></div>
+    <p><small>Reprendre une partie avec un code :</small></p>
+    <input id="save-input" autocomplete="off" spellcheck="false" maxlength="128" placeholder="Colle ton code ici">
+    <div class="row"><button id="save-restore">Reprendre cette partie</button><button id="save-close">Fermer</button></div>
+  </div></div>
   <div id="battle" hidden>
     <div class="hpb" id="b-foe"><b></b><span class="lv"></span><div class="bar"><i></i></div></div>
     <div class="hpb" id="b-mine"><b></b><span class="lv"></span><div class="bar"><i></i></div><div class="num"></div></div>

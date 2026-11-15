@@ -1,6 +1,6 @@
 /* Service worker : hors ligne. Réseau d'abord (toujours la dernière version en ligne), copie en cache en secours.
    Les appels dynamiques (api.php, data/) ne passent jamais par le cache. */
-const CACHE = 'bramblekin-v5';
+const CACHE = 'bramblekin-v6';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.add('./')).catch(() => {}).then(() => self.skipWaiting()));
@@ -18,7 +18,7 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== self.location.origin) return;
-  if (url.pathname.endsWith('/api.php') || url.pathname.includes('/data/') || url.pathname.endsWith('/sw.js')) return;
+  if (url.pathname.endsWith('/api.php') || url.pathname.endsWith('/save.php') || url.pathname.includes('/data/') || url.pathname.endsWith('/sw.js')) return;
   event.respondWith(
     fetch(req)
       .then((res) => {

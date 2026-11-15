@@ -43,8 +43,10 @@ scenery with shadows, animated grass and water, creatures shaded like little toy
 The page served at `/` is the 3D game (`web/index.php` + `web/game.js`, three.js r170 vendored under `web/vendor/`, MIT):
 the same 60 maps in real 3D, one seamless world with no loading between towns and routes, trainers who spot you and walk
 up to battle, 3D battles, wild encounters, an action key to pick up items and talk, and quality profiles for phones and
-computers (frame-rate cap, adaptive resolution, shadows updated only when something moves). It runs entirely in the
-browser: it does not use the game server yet (no other players, no saves). `php tools/export-3d.php` regenerates
+computers (frame-rate cap, adaptive resolution, shadows updated only when something moves). It runs in the browser and saves
+automatically: `web/save.php` keeps each game under the SHA-256 hash of a secret code held by the browser (shown in the
+💾 panel to resume on another device), with a local copy as fallback. It does not use the game server yet (no other
+players). `php tools/export-3d.php` regenerates
 `web/zones.json` and `web/content.json` from the world generator. The former 2D client was removed; the PHP game server
 below is still built and tested, ready for the 3D client to connect to it.
 

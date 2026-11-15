@@ -6,6 +6,7 @@
   <file>src</file>
   <file>server</file>
   <file>web/api.php</file>
+  <file>web/save.php</file>
   <file>tests/php</file>
   <rule ref="PSR12"/>
   <!-- phpcs 4 ne comprend pas encore les property hooks de PHP 8.4+ : faux positifs, exclus fichier par fichier. -->
