@@ -13,6 +13,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <script src="pwa.js" defer></script>
   <style>
+    [hidden] { display: none !important; }      /* une fenêtre masquée le reste, quel que soit son style */
     html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd3f5; font: 600 14px system-ui, sans-serif; }
     canvas { display: block; width: 100%; height: 100%; touch-action: none; }
     .hud { position: fixed; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; gap: 8px; pointer-events: none; }

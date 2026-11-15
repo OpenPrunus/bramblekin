@@ -1322,7 +1322,7 @@ $('btn-save').addEventListener('click', () => {
   busy = true;
 });
 $('save-close').addEventListener('click', () => { $('save-panel').hidden = true; busy = !!battle || !!event; });
-$('save-now').addEventListener('click', () => { const b = busy; busy = false; save(); busy = b; });
+$('save-now').addEventListener('click', () => { busy = false; save(); setTimeout(() => { $('save-panel').hidden = true; busy = !!battle || !!event; }, 900); });
 $('save-copy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(token()); $('save-copy').textContent = 'Copié ✔'; } catch { /* ignoré */ } });
 $('save-restore').addEventListener('click', () => {
   const code = $('save-input').value.trim();

@@ -36,3 +36,9 @@ test('service worker : réseau d\'abord, cache en secours, jamais l\'API ni les 
   assert.match(sw, /\/data\//);
   new Function(sw.replace(/self\.addEventListener/g, '(() => {})'));        // syntaxe valide
 });
+
+test('les fenêtres masquées (sauvegarde, dialogues, combat) restent masquées malgré leur style', () => {
+  const html = read('index.php');
+  assert.match(html, /\[hidden\]\s*\{\s*display:\s*none\s*!important/);
+  assert.match(html, /<div id="save-panel" hidden>/);
+});
