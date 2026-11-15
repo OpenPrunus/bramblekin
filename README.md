@@ -49,10 +49,13 @@ automatically: `web/save.php` keeps each game under the SHA-256 hash of a secret
 `password_hash`) is then required to read or overwrite the save; 5 wrong PINs lock it for 15 minutes. The HUD shows how many players are online (`web/online.php`,
 a ping every 25 s) and opens a chat: a general channel and private messages (`web/chat.php`, 200 characters, one
 message every 2 s, the last 300 kept, players identified only by a public id derived from their code). Nicknames are reserved by the first player who
-takes one (case-insensitive, released after 90 days unused or when its owner picks another one). Players do not
-see each other in the world yet. `php tools/export-3d.php` regenerates
-`web/zones.json` and `web/content.json` from the world generator. The former 2D client was removed; the PHP game server
-below is still built and tested, ready for the 3D client to connect to it.
+takes one (case-insensitive, released after 90 days unused or when its owner picks another one). Players **see each
+other in real time**: every step is sent over the WebSocket server, which only relays it (`src/Game/Relay.php`) to the
+players in the same place (outdoors, or the same building; the bedroom stays private). Other players show up with their
+nickname, walk smoothly, can be walked through, and facing one then pressing the action key opens a private message.
+`php tools/export-3d.php` regenerates `web/zones.json` and `web/content.json` from the world generator. The former 2D
+client was removed; the rest of the PHP game server below (authoritative moves, battles, duels, trades) is still built
+and tested, but the 3D client only uses its position relay for now.
 
 ## Quick start
 

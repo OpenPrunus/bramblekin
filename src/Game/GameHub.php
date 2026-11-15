@@ -48,6 +48,7 @@ final class GameHub implements Hub
 
     public readonly Presence $presence;
     public readonly Fights $fights;
+    public readonly Relay $relay;
 
     public function __construct(
         private readonly ProfileStore $store,
@@ -57,8 +58,10 @@ final class GameHub implements Hub
         private readonly LoggerInterface $logger,
         private readonly Randomizer $rng = new Randomizer(),
         ?RankingGuard $guard = null,
+        ?Relay $relay = null,
     ) {
         $this->presence = new Presence();
+        $this->relay = $relay ?? new Relay();
         $this->fights = new Fights($this->presence, $store, $ratings, $guard ?? RankingGuard::fromEnvironment('BRAMBLE'), $config, $rng);
     }
 
@@ -100,6 +103,11 @@ final class GameHub implements Hub
         $type = $msg['t'];
         if ($type === 'ping') {
             $c->send('pong', ['c' => is_int($msg['c'] ?? null) ? $msg['c'] : 0]);
+
+            return;
+        }
+        if ($type === 'whereHello' || $type === 'where') {
+            $this->relay->receive($c, $type, $msg, $now);
 
             return;
         }
@@ -758,6 +766,9 @@ final class GameHub implements Hub
     #[\Override]
     public function disconnect(Session $session): void
     {
+        if ($session instanceof Client) {
+            $this->relay->remove($session);
+        }
         if ($session instanceof Client && !$session->kicked) {
             $this->drop($session);
         } elseif ($session instanceof Client) {

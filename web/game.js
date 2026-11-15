@@ -665,6 +665,7 @@ function place(x, y, d = me.d) {
   const by = blocked(x, y + 1) ? y : y + 1;
   Object.assign(pal, { x, y: by, fromX: x, fromY: by });
   snapCamera = true;
+  sendPos();
 }
 
 let region = '';
@@ -772,6 +773,7 @@ function tryStep() {
   if (blocked(me.x + dx, me.y + dy)) return;
   Object.assign(pal, { fromX: pal.x, fromY: pal.y, x: me.x, y: me.y });
   Object.assign(me, { fromX: me.x, fromY: me.y, x: me.x + dx, y: me.y + dy, t: 0 });
+  sendPos();                                        // dès le début du pas : les autres le voient marcher en même temps
 }
 
 // --- les dresseurs repèrent le joueur qui passe devant eux, viennent à lui et imposent le combat ---------------------
@@ -1140,7 +1142,11 @@ function interact() {
   let tx = me.x + dx; let ty = me.y + dy;
   if (inside && inside.rows[ty]?.[tx] === 'C') { tx += dx; ty += dy; }       // par-dessus le comptoir
   const p = personAt(tx, ty);
-  if (!p) return;
+  if (!p) {
+    const o = otherAt(me.x + dx, me.y + dy);
+    if (o) { openChat(); openConv(o.id, o.name || undefined); }
+    return;
+  }
   if (p.kind === 'item') {
     p.model?.parent?.remove(p.model);
     const list = inside ? insidePeople : people;
@@ -1221,6 +1227,7 @@ function frame(now) {
     if (m.userData.spin) m.rotation.y += dt * 1.2;
     else if (m.userData.body && !(event && event.p === p)) m.userData.body.scale.y = 1 + Math.sin(time.value * 2 + m.position.x) * 0.02;
   }
+  const othersMoving = animateOthers(dt, px, pz);
   if (battle) {
     battleFrame(dt);
   } else {
@@ -1238,7 +1245,7 @@ function frame(now) {
     a.needsUpdate = true;
     snow.position.set(px - 15, 0, pz - 15);
   }
-  if (me.t < 1 || event?.moving || shadowDirty || battle) { renderer.shadowMap.needsUpdate = true; shadowDirty = false; }
+  if (me.t < 1 || othersMoving || event?.moving || shadowDirty || battle) { renderer.shadowMap.needsUpdate = true; shadowDirty = false; }
   if (composer) composer.render(); else renderer.render(scene, camera);
   $('perf').textContent = `${Math.round(1 / Math.max(raw, 0.001))} ips · ${MOBILE ? 'mobile' : 'ordinateur'} · résolution ×${ratio.toFixed(2)}`;
 }
@@ -1398,6 +1405,7 @@ async function presence() {
       myName = '';
       try { localStorage.removeItem(NAME_KEY); } catch { /* ignoré */ }
       $('chat-name').hidden = false;
+      helloWhere();
     }
     players = (d.players ?? []).filter((p) => p.id !== myId);
     for (const p of d.players ?? []) chat.names[p.id] = p.name;
@@ -1408,6 +1416,139 @@ async function presence() {
 presence();
 setInterval(() => { if (!document.hidden) presence(); }, 25000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { presence(); pollChat(); } });
+
+// --- les autres joueurs, visibles dans le monde en temps réel (dehors et dans le même bâtiment) ----------------------
+// Chaque pas part aussitôt au serveur WebSocket, qui le relaie aux joueurs du même lieu ; on rejoue leurs pas en douceur.
+// Le serveur ne fait que relayer : la partie (sauvegarde, combats) reste dans le navigateur. On traverse les autres joueurs.
+const othersRoot = new THREE.Group();
+scene.add(othersRoot);
+const others = new Map();
+const placeKey = () => (inside ? inside.id : 'out');
+function nameTag(text) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = '700 30px system-ui, sans-serif';
+  const w = Math.min(248, g.measureText(text).width + 28);
+  g.fillStyle = 'rgba(20, 24, 40, 0.72)';
+  g.beginPath(); g.roundRect((256 - w) / 2, 8, w, 48, 22); g.fill();
+  g.fillStyle = '#ffffff'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 128, 33, 230);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false }));
+  sp.scale.set(1.6, 0.4, 1);
+  sp.position.y = 1.42;
+  return sp;
+}
+function addOther(p) {
+  if (others.has(p.id)) removeOther(others.get(p.id));
+  const n = parseInt(p.id.slice(0, 6), 16) || 0;
+  const model = character({ shirt: LOOKS[n % LOOKS.length], hair: [0x4a2f22, 0x1f1d24, 0xd4a03a, 0xa3482a, 0x7a3b2e][(n >> 3) % 5], pants: [0x3b4664, 0x2f3a2a, 0x5a4636][(n >> 6) % 3] });
+  const o = { id: p.id, name: '', model, tag: null, x: p.x, y: p.y, fromX: p.x, fromY: p.y, t: 1, d: p.d, queue: [], phase: 0 };
+  setTag(o, p.name);
+  model.position.set(p.x + 0.5, 0, p.y + 0.5);
+  model.rotation.y = ROT[p.d] ?? 0;
+  othersRoot.add(model);
+  others.set(p.id, o);
+  shadowDirty = true;
+  return o;
+}
+function setTag(o, name) {
+  if (o.tag && o.name === name) return;
+  if (o.tag) { o.model.remove(o.tag); o.tag.material.map.dispose(); o.tag.material.dispose(); }
+  o.name = name;
+  o.tag = nameTag(name || 'Dresseur');
+  o.model.add(o.tag);
+}
+function removeOther(o) {
+  othersRoot.remove(o.model);
+  dispose(o.model);
+  others.delete(o.id);
+  shadowDirty = true;
+}
+function clearOthers() { for (const o of [...others.values()]) removeOther(o); }
+function otherAt(x, y) { for (const o of others.values()) if (o.model.visible && o.x === x && o.y === y && o.t >= 1) return o; return null; }
+
+let ws = null;
+let wsReady = false;
+let wsRetry = 1000;
+let wsPing = 0;
+function wsUrl() {
+  if (typeof window.BRAMBLE_WS === 'string' && window.BRAMBLE_WS) return window.BRAMBLE_WS;
+  const { protocol, hostname, host } = location;
+  return protocol === 'https:' ? `wss://${host}/ws` : `ws://${hostname}:8081`;
+}
+const wsSend = (msg) => { if (wsReady) ws.send(JSON.stringify(msg)); };
+const posMsg = () => ({ place: placeKey(), x: me.x, y: me.y, d: me.d });
+let lastSent = '';
+function sendPos() {
+  const m = posMsg();
+  const k = `${m.place}:${m.x}:${m.y}:${m.d}`;
+  if (k === lastSent) return;
+  lastSent = k;
+  wsSend({ t: 'where', ...m });
+}
+function helloWhere() { if (wsReady) { lastSent = ''; ws.send(JSON.stringify({ t: 'whereHello', token: token(), name: myName, ...posMsg() })); } }
+function connectWorld() {
+  if (ws && ws.readyState <= 1) return;
+  try { ws = new WebSocket(wsUrl()); } catch { return; }
+  ws.onopen = () => { wsReady = true; wsRetry = 1000; helloWhere(); };
+  ws.onmessage = (e) => {
+    let m;
+    try { m = JSON.parse(e.data); } catch { return; }
+    if (m.t === 'wherePeers') { clearOthers(); for (const p of m.peers ?? []) if (!muted.has(p.id)) addOther(p); }
+    else if (m.t === 'whereJoin') { if (!muted.has(m.id)) addOther(m); }
+    else if (m.t === 'whereLeave') { const o = others.get(m.id); if (o) removeOther(o); }
+    else if (m.t === 'whereMove') {
+      const o = others.get(m.id);
+      if (!o) return;
+      o.d = m.d;
+      o.at = Date.now();
+      const tail = o.queue.at(-1) ?? [o.x, o.y];
+      if (tail[0] !== m.x || tail[1] !== m.y) o.queue.push([m.x, m.y]);
+      if (o.queue.length > 12) o.queue.splice(0, o.queue.length - 12);
+    }
+  };
+  ws.onclose = () => {
+    wsReady = false; ws = null;
+    clearOthers();
+    setTimeout(() => { if (!document.hidden) connectWorld(); }, wsRetry);
+    wsRetry = Math.min(30000, wsRetry * 2);
+  };
+}
+// un signe de vie de temps en temps : le serveur ferme les connexions muettes
+setInterval(() => { if (wsReady && performance.now() - wsPing > 20000) { wsPing = performance.now(); wsSend({ t: 'ping' }); } }, 5000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) connectWorld(); });
+function animateOthers(dt, px, pz) {
+  othersRoot.visible = !battle;
+  let moving = false;
+  for (const o of others.values()) {
+    if (o.t >= 1 && o.queue.length) {
+      const [nx, ny] = o.queue.shift();
+      if (Math.abs(nx - o.x) + Math.abs(ny - o.y) === 1) {
+        o.d = nx > o.x ? 'r' : nx < o.x ? 'l' : ny > o.y ? 'd' : 'u';
+        Object.assign(o, { fromX: o.x, fromY: o.y, x: nx, y: ny, t: 0 });
+      } else Object.assign(o, { fromX: nx, fromY: ny, x: nx, y: ny, t: 1 });   // porte, chargement : on le pose directement
+    }
+    if (o.t < 1) {
+      // en retard (beaucoup de pas en attente) : il marche plus vite pour rattraper
+      o.t = Math.min(1, o.t + dt / (STEP * (o.queue.length > 3 ? 0.6 : 1)));
+      o.phase += dt * 16;
+      moving = true;
+    }
+    const ox = o.fromX + (o.x - o.fromX) * o.t + 0.5;
+    const oz = o.fromY + (o.y - o.fromY) * o.t + 0.5;
+    const m = o.model;
+    m.visible = Math.abs(ox - px) < 22 && Math.abs(oz - pz) < 22;
+    if (!m.visible) continue;
+    m.position.set(ox, Math.abs(Math.sin(o.phase)) * (o.t < 1 ? 0.04 : 0), oz);
+    const r = ROT[o.d] ?? 0;
+    m.rotation.y += Math.atan2(Math.sin(r - m.rotation.y), Math.cos(r - m.rotation.y)) * Math.min(1, dt * 14);
+    animateWalk(m, o.phase, o.t < 1);
+  }
+  return moving;
+}
 
 const convOf = (m) => (m.to === null ? 'all' : m.from === myId ? m.to : m.from);
 async function pollChat() {
@@ -1540,7 +1681,7 @@ $('chat-name-ok').addEventListener('click', () => {
   try { localStorage.setItem(NAME_KEY, n); } catch { /* ignoré */ }
   $('chat-name').hidden = true;
   $('chat-note').textContent = '';
-  presence().then(() => { if (myName) { $('chat-note').textContent = `Pseudo « ${myName} » réservé pour toi ✔`; $('chat-input').focus(); } });
+  presence().then(() => { helloWhere(); if (myName) { $('chat-note').textContent = `Pseudo « ${myName} » réservé pour toi ✔`; $('chat-input').focus(); } });
 });
 $('chat-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1574,5 +1715,6 @@ if (where && !where.inside && Number.isInteger(where.x) && Number.isInteger(wher
 else place(15 + start.x0, 13 + start.z0);
 updateOutdoor();
 if (where?.inside && zones[where.inside]) goInside(where.inside, where.x, where.y);
+connectWorld();
 requestAnimationFrame(frame);
-window.__demo = { chat, openChat, presence, pollChat, get players() { return players; }, save, snapshot, party, bag, renderer, MOBILE, me, place, goInside, people, chunkOf, updateOutdoor, get event() { return event; } };
+window.__demo = { chat, openChat, presence, pollChat, get players() { return players; }, save, snapshot, party, bag, renderer, MOBILE, me, place, goInside, people, chunkOf, updateOutdoor, get event() { return event; }, others, held, get wsReady() { return wsReady; } };

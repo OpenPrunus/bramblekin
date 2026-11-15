@@ -1,3 +1,7 @@
+<?php
+// URL WebSocket vue par le navigateur (BRAMBLE_WS) ; vide = même hôte, /ws derrière HTTPS (sinon port 8081).
+$ws = (string) getenv('BRAMBLE_WS');
+?>
 <!doctype html>
 <html lang="fr">
 <head>
@@ -11,6 +15,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <script>window.BRAMBLE_WS = <?= json_encode($ws, JSON_THROW_ON_ERROR | JSON_HEX_TAG | JSON_HEX_AMP) ?>;</script>
   <script src="pwa.js" defer></script>
   <style>
     [hidden] { display: none !important; }      /* une fenêtre masquée le reste, quel que soit son style */

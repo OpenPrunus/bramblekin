@@ -77,6 +77,27 @@ describe('monde partagé', () => {
     assert.equal((await gone).id, seen.id);
   });
 
+  test('monde 3D : les positions sont relayées en temps réel aux joueurs du même lieu', async () => {
+    const a = await bot();
+    const b = await bot();
+    const peersA = a.next('wherePeers');
+    a.send({ t: 'whereHello', token: token('relay-a'), name: 'Elsa', place: 'out', x: 15, y: 600, d: 'u' });
+    const me = (await peersA).me;
+    const peersB = b.next('wherePeers');
+    const joined = a.next('whereJoin');
+    b.send({ t: 'whereHello', token: token('relay-b'), name: 'Farid', place: 'out', x: 15, y: 602, d: 'u' });
+    assert.deepEqual((await peersB).peers, [{ id: me, name: 'Elsa', x: 15, y: 600, d: 'u' }]);
+    assert.equal((await joined).name, 'Farid');
+    const moved = b.next('whereMove');
+    const t0 = Date.now();
+    a.send({ t: 'where', place: 'out', x: 15, y: 599, d: 'u' });
+    assert.deepEqual(await moved, { t: 'whereMove', id: me, x: 15, y: 599, d: 'u' });
+    assert.ok(Date.now() - t0 < 500, 'relayé aussitôt');
+    const left = b.next('whereLeave');
+    a.send({ t: 'where', place: 'c1', x: 5, y: 8, d: 'u' });
+    assert.equal((await left).id, me, 'entrer dans un bâtiment fait disparaître du dehors');
+  });
+
   test('le serveur refuse les murs et la téléportation, et sauvegarde la progression', async () => {
     const a = await bot();
     const tok = token('Eve-save');

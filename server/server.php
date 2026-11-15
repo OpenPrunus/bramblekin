@@ -4,6 +4,7 @@
  * Serveur du monde partagé de Bramblekin : WebSocket (RFC 6455) en PHP pur.
  *
  * Le serveur fait foi pour tout : sauvegardes (un fichier par joueur), déplacements, rencontres, combats, duels et échanges.
+ * Il relaie aussi, en temps réel, les positions des joueurs du monde 3D (src/Game/Relay.php), dont la partie reste dans le navigateur.
  * Variables d'environnement : WS_PORT (8081), WS_ALLOWED_ORIGINS (liste séparée par des virgules, vide = tout),
  * BRAMBLE_DATA_DIR (sauvegardes et classement), TRUSTED_PROXIES, BRAMBLE_MAX_CONN_PER_IP, BRAMBLE_ENCOUNTER_RATE,
  * BRAMBLE_TURN_SECONDS, BRAMBLE_INVITE_TTL. Le code est dans src/ (namespace Bramble\).
@@ -17,7 +18,9 @@ use Arcade\Support\Env;
 use Arcade\Support\StdoutLogger;
 use Arcade\Support\SystemClock;
 use Arcade\WebSocket\Handshake;
+use Bramble\Api\Nicknames;
 use Bramble\Game\Config;
+use Bramble\Game\Relay;
 use Bramble\Game\GameHub;
 use Bramble\Player\ProfileStore;
 use Bramble\Ranking\Ratings;
@@ -35,7 +38,14 @@ if (!is_dir("$dataDir/players")) {
 }
 
 World::zones();                                                       // le monde est généré une fois, au démarrage
-$hub = new GameHub(new ProfileStore("$dataDir/players"), new Ratings("$dataDir/ratings.json"), Config::fromEnvironment(), new SystemClock(), new StdoutLogger());
+$hub = new GameHub(
+    new ProfileStore("$dataDir/players"),
+    new Ratings("$dataDir/ratings.json"),
+    Config::fromEnvironment(),
+    new SystemClock(),
+    new StdoutLogger(),
+    relay: new Relay(new Nicknames("$dataDir/names.json")),        // positions du monde 3D, relayées en temps réel
+);
 try {
     $proxies = TrustedProxies::fromString(Env::string('TRUSTED_PROXIES'));
     $perIp = (int) Env::number('BRAMBLE_MAX_CONN_PER_IP', 10, true);
