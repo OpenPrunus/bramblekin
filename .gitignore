@@ -5,3 +5,6 @@ web/data/*.json
 web/data/*.tmp
 .phpunit.result.cache
 web/data/players/
+coverage.txt
+php-coverage.txt
+coverage.txt
